@@ -19,6 +19,7 @@ import socket
 import hashlib
 import subprocess
 import threading
+import time
 import os
 import sys
 import uuid
@@ -148,7 +149,11 @@ class ClipboardHandler:
                 return self._win_get()
             elif self.system == "Linux":
                 return self._linux_get()
-        except Exception:
+        except Exception as e:
+            try:
+                log(f"clipboard get hatası ({self.system}): {e!r}")
+            except Exception:
+                pass
             return ""
 
     def set(self, text: str):
@@ -159,24 +164,72 @@ class ClipboardHandler:
                 self._win_set(text)
             elif self.system == "Linux":
                 self._linux_set(text)
-        except Exception:
-            pass
+        except Exception as e:
+            try:
+                log(f"clipboard set hatası ({self.system}): {e!r}")
+            except Exception:
+                pass
+
+    @staticmethod
+    def _win_setup_ctypes():
+        """Win32 API çağrıları için argtypes/restype tanımla.
+        Belirtilmezse 64-bit handle'lar 32-bit int'e truncate olur ve
+        GlobalLock NULL döner — clipboard sessizce çalışmaz."""
+        import ctypes
+        from ctypes import wintypes
+        u = ctypes.windll.user32
+        k = ctypes.windll.kernel32
+
+        u.OpenClipboard.argtypes = [wintypes.HWND]
+        u.OpenClipboard.restype = wintypes.BOOL
+        u.CloseClipboard.argtypes = []
+        u.CloseClipboard.restype = wintypes.BOOL
+        u.EmptyClipboard.argtypes = []
+        u.EmptyClipboard.restype = wintypes.BOOL
+        u.GetClipboardData.argtypes = [wintypes.UINT]
+        u.GetClipboardData.restype = wintypes.HANDLE
+        u.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+        u.SetClipboardData.restype = wintypes.HANDLE
+
+        k.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+        k.GlobalAlloc.restype = wintypes.HGLOBAL
+        k.GlobalLock.argtypes = [wintypes.HGLOBAL]
+        k.GlobalLock.restype = wintypes.LPVOID
+        k.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+        k.GlobalUnlock.restype = wintypes.BOOL
+        k.GlobalSize.argtypes = [wintypes.HGLOBAL]
+        k.GlobalSize.restype = ctypes.c_size_t
+        return u, k
+
+    @staticmethod
+    def _win_open_clipboard(u):
+        """Başka bir process panoyu kilitlemiş olabilir — birkaç kez dene."""
+        for _ in range(10):
+            if u.OpenClipboard(None):
+                return True
+            time.sleep(0.03)
+        return False
 
     def _win_get(self) -> str:
         import ctypes
-        u = ctypes.windll.user32
-        k = ctypes.windll.kernel32
-        if not u.OpenClipboard(0):
+        u, k = self._win_setup_ctypes()
+        CF_UNICODETEXT = 13
+
+        if not self._win_open_clipboard(u):
             return ""
         try:
-            h = u.GetClipboardData(13)
+            h = u.GetClipboardData(CF_UNICODETEXT)
             if not h:
                 return ""
-            k.GlobalLock.restype = ctypes.c_void_p
             p = k.GlobalLock(h)
             if not p:
                 return ""
             try:
+                size = k.GlobalSize(h)
+                # GlobalSize byte cinsinden; UTF-16 = 2 byte/char, son null hariç
+                if size:
+                    chars = max(0, size // 2 - 1)
+                    return ctypes.wstring_at(p, chars)
                 return ctypes.wstring_at(p)
             finally:
                 k.GlobalUnlock(h)
@@ -185,19 +238,31 @@ class ClipboardHandler:
 
     def _win_set(self, text: str):
         import ctypes
-        u = ctypes.windll.user32
-        k = ctypes.windll.kernel32
-        if not u.OpenClipboard(0):
+        u, k = self._win_setup_ctypes()
+        CF_UNICODETEXT = 13
+        GMEM_MOVEABLE = 0x0002
+
+        data = text.encode("utf-16-le") + b"\x00\x00"
+
+        if not self._win_open_clipboard(u):
             return
         try:
             u.EmptyClipboard()
-            data = text.encode("utf-16-le") + b"\x00\x00"
-            h = k.GlobalAlloc(0x0002, len(data))
-            k.GlobalLock.restype = ctypes.c_void_p
+            h = k.GlobalAlloc(GMEM_MOVEABLE, len(data))
+            if not h:
+                return
             p = k.GlobalLock(h)
+            if not p:
+                return
             ctypes.memmove(p, data, len(data))
             k.GlobalUnlock(h)
-            u.SetClipboardData(13, h)
+            # SetClipboardData başarısızsa h'i bizim free etmemiz lazım;
+            # başarılıysa sahipliği sisteme geçer.
+            if not u.SetClipboardData(CF_UNICODETEXT, h):
+                free = ctypes.windll.kernel32.GlobalFree
+                free.argtypes = [ctypes.c_void_p]
+                free.restype = ctypes.c_void_p
+                free(h)
         finally:
             u.CloseClipboard()
 
