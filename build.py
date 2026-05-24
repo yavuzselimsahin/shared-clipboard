@@ -1,16 +1,17 @@
 """
 Shared Clipboard — Tek Dosya Paketleyici
 ==========================================
-Bu script, tray_client.py ve server.py dosyalarını
-tek çalıştırılabilir dosyalara (.exe / binary) dönüştürür.
+tray_client.py'yi tek bir çalıştırılabilir dosyaya/uygulamaya paketler.
+Mesh + mDNS mimarisi olduğu için ayrı bir sunucuya gerek yok.
 
 Kullanım:
-    pip install pyinstaller
+    pip install -r requirements.txt
     python build.py
 
 Sonuç:
-    dist/SharedClipboard      (veya .exe)  — İstemci uygulaması
-    dist/SharedClipboardServer (veya .exe)  — Sunucu
+    macOS  → dist/SharedClipboard.app
+    Linux  → dist/SharedClipboard
+    Windows → dist/SharedClipboard.exe
 """
 
 import subprocess
@@ -18,63 +19,51 @@ import platform
 import sys
 import os
 
+
 def build():
     system = platform.system()
     icon_arg = []
 
-    # Windows'ta icon dosyası varsa ekle
     if system == "Windows" and os.path.exists("icon.ico"):
         icon_arg = ["--icon=icon.ico"]
+    elif system == "Darwin" and os.path.exists("icon.icns"):
+        icon_arg = ["--icon=icon.icns"]
 
     print("=" * 50)
     print("📦 Shared Clipboard — Paketleme")
     print("=" * 50)
 
-    # 1) İstemci (Tray uygulaması)
     print("\n🔨 İstemci paketleniyor...")
+    # macOS'ta .app bundle yapacaksak --onedir kullanmak şart (PyInstaller >=6 uyarısı)
+    package_mode = "--onedir" if system == "Darwin" else "--onefile"
+
     client_cmd = [
         sys.executable, "-m", "PyInstaller",
-        "--onefile",
-        "--windowed",                    # konsolsuz (GUI)
+        package_mode,
+        "--windowed",                       # konsolsuz GUI
         "--name", "SharedClipboard",
+        "--collect-submodules", "zeroconf", # mDNS bağımlılıkları
+        "--hidden-import", "websockets.legacy",
+        "--hidden-import", "websockets.legacy.client",
+        "--hidden-import", "websockets.legacy.server",
         *icon_arg,
         "--add-data", f"README.md{os.pathsep}.",
         "tray_client.py",
     ]
     subprocess.run(client_cmd, check=True)
 
-    # 2) Sunucu
-    print("\n🔨 Sunucu paketleniyor...")
-    server_cmd = [
-        sys.executable, "-m", "PyInstaller",
-        "--onefile",
-        "--console",                     # konsol uygulaması
-        "--name", "SharedClipboardServer",
-        *icon_arg,
-        "server.py",
-    ]
-    subprocess.run(server_cmd, check=True)
-
     print("\n" + "=" * 50)
     print("✅ Paketleme tamamlandı!")
-    print(f"   Dosyalar: {os.path.abspath('dist')}")
+    print(f"   Çıktı: {os.path.abspath('dist')}")
     print("=" * 50)
 
-    if system == "Windows":
-        print("""
+    print("""
 Dağıtım:
-  1. dist/SharedClipboardServer.exe → Sunucu makinesine kopyala
-  2. dist/SharedClipboard.exe → Tüm makinelere kopyala
-  3. Önce sunucuyu başlat, sonra istemcileri çalıştır
-        """)
-    else:
-        print("""
-Dağıtım:
-  1. dist/SharedClipboardServer → Sunucu makinesine kopyala
-  2. dist/SharedClipboard → Tüm makinelere kopyala
-  3. chmod +x ile çalıştırılabilir yap
-  4. Önce sunucuyu başlat, sonra istemcileri çalıştır
-        """)
+  1. dist/SharedClipboard(.app/.exe) → arkadaşına gönder
+  2. Aynı Wi-Fi'a bağlı her cihazda aç — birbirini otomatik bulur
+  3. macOS'ta ilk açılışta "İnternetten gelen yazılım" uyarısı çıkabilir,
+     sağ tık → Aç ile geç (veya Sistem Ayarları → Gizlilik & Güvenlik)
+""")
 
 
 if __name__ == "__main__":

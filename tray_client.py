@@ -1,10 +1,12 @@
 """
-Shared Clipboard — Tray Client
-================================
-Sistem tepsisinde çalışan, kullanıcı dostu clipboard paylaşım istemcisi.
+Shared Clipboard — Tray Client (LAN-only mesh)
+================================================
+Sistem tepsisinde çalışan clipboard paylaşım istemcisi.
+Sunucu yok: her cihaz aynı Wi-Fi'daki diğer cihazları mDNS/Bonjour ile
+otomatik bulur ve birbirine doğrudan bağlanır.
 
 Gereksinimler:
-    pip install websockets pystray Pillow
+    pip install websockets pystray Pillow zeroconf
 
 Linux ek:
     sudo apt install xclip python3-tk
@@ -19,7 +21,7 @@ import subprocess
 import threading
 import os
 import sys
-import time
+import uuid
 from datetime import datetime
 
 try:
@@ -30,13 +32,62 @@ except ImportError:
 
 try:
     from pystray import Icon, Menu, MenuItem
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw
 except ImportError:
     print("Gerekli: pip install pystray Pillow")
     sys.exit(1)
 
+try:
+    from zeroconf import ServiceInfo, ServiceStateChange, IPVersion
+    from zeroconf.asyncio import AsyncZeroconf, AsyncServiceBrowser
+except ImportError:
+    print("Gerekli: pip install zeroconf")
+    sys.exit(1)
+
 import tkinter as tk
 from tkinter import ttk, messagebox
+
+
+SERVICE_TYPE = "_sharedclipboard._tcp.local."
+
+
+def _log_path():
+    """macOS .app içinden stdout görünmediği için dosyaya log yazıyoruz."""
+    if platform.system() == "Windows":
+        base = os.environ.get("APPDATA", os.path.expanduser("~"))
+    elif platform.system() == "Darwin":
+        base = os.path.expanduser("~/Library/Logs")
+    else:
+        base = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
+    log_dir = os.path.join(base, "SharedClipboard")
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+    except Exception:
+        pass
+    return os.path.join(log_dir, "tray_client.log")
+
+
+def log(msg: str):
+    line = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
+    print(line, flush=True)
+    try:
+        with open(_log_path(), "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+
+def sanitize_label(name: str) -> str:
+    """mDNS service label için güvenli karakter seti."""
+    out = []
+    for c in name:
+        if c.isalnum() or c in "-_":
+            out.append(c)
+        elif c == " ":
+            out.append("-")
+        # diğer karakterler atlanır
+    cleaned = "".join(out).strip("-_")
+    return cleaned or "device"
 
 
 # ──────────────────────────────────────────────
@@ -58,10 +109,8 @@ def get_config_path():
 def load_config() -> dict:
     path = get_config_path()
     defaults = {
-        "server_host": "",
-        "server_port": 8765,
         "device_name": socket.gethostname(),
-        "auto_connect": False,
+        "auto_start": True,
         "polling_ms": 300,
     }
     try:
@@ -176,17 +225,12 @@ def create_icon_image(color="#4CAF50", status_color=None):
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    # Clipboard gövdesi
     draw.rounded_rectangle([8, 12, 56, 58], radius=6, fill=color, outline="#333", width=2)
-
-    # Clipboard klipsi (üst kısım)
     draw.rounded_rectangle([20, 4, 44, 20], radius=4, fill="#666", outline="#333", width=2)
 
-    # Satır çizgileri (kağıt efekti)
     for y in [26, 34, 42, 50]:
         draw.line([(16, y), (48, y)], fill="#ffffff80", width=2)
 
-    # Durum noktası (sağ alt)
     if status_color:
         draw.ellipse([44, 44, 58, 58], fill=status_color, outline="#333", width=1)
 
@@ -205,7 +249,7 @@ def run_settings_ui():
 
     root = tk.Tk()
     root.title("Shared Clipboard — Ayarlar")
-    root.geometry("420x320")
+    root.geometry("420x260")
     root.resizable(False, False)
 
     style = ttk.Style(root)
@@ -217,39 +261,29 @@ def run_settings_ui():
     main_frame.pack(fill="both", expand=True)
 
     ttk.Label(main_frame, text="📋 Shared Clipboard", style="Header.TLabel").pack(anchor="w")
+    ttk.Label(main_frame, text="Aynı Wi-Fi'daki cihazlar otomatik bulunur.").pack(anchor="w")
     ttk.Separator(main_frame, orient="horizontal").pack(fill="x", pady=(5, 15))
 
     form = ttk.Frame(main_frame)
     form.pack(fill="x")
 
-    ttk.Label(form, text="Sunucu IP:").grid(row=0, column=0, sticky="w", pady=5)
-    host_var = tk.StringVar(value=config["server_host"])
-    ttk.Entry(form, textvariable=host_var, width=25).grid(row=0, column=1, pady=5, padx=(10, 0))
-
-    ttk.Label(form, text="Port:").grid(row=1, column=0, sticky="w", pady=5)
-    port_var = tk.StringVar(value=str(config["server_port"]))
-    ttk.Entry(form, textvariable=port_var, width=10).grid(row=1, column=1, pady=5, padx=(10, 0), sticky="w")
-
-    ttk.Label(form, text="Cihaz Adı:").grid(row=2, column=0, sticky="w", pady=5)
+    ttk.Label(form, text="Cihaz Adı:").grid(row=0, column=0, sticky="w", pady=5)
     name_var = tk.StringVar(value=config["device_name"])
-    ttk.Entry(form, textvariable=name_var, width=25).grid(row=2, column=1, pady=5, padx=(10, 0))
+    ttk.Entry(form, textvariable=name_var, width=28).grid(row=0, column=1, pady=5, padx=(10, 0))
 
-    auto_var = tk.BooleanVar(value=config["auto_connect"])
-    ttk.Checkbutton(main_frame, text="Başlangıçta otomatik bağlan", variable=auto_var).pack(anchor="w", pady=(15, 5))
+    auto_var = tk.BooleanVar(value=config.get("auto_start", True))
+    ttk.Checkbutton(main_frame, text="Açılışta otomatik yayına başla", variable=auto_var).pack(anchor="w", pady=(15, 5))
 
     btn_frame = ttk.Frame(main_frame)
     btn_frame.pack(fill="x", pady=(15, 0))
 
     def save():
-        try:
-            port = int(port_var.get().strip())
-        except ValueError:
-            messagebox.showerror("Hata", "Port geçerli bir sayı olmalı.")
+        name = name_var.get().strip()
+        if not name:
+            messagebox.showerror("Hata", "Cihaz adı boş olamaz.")
             return
-        config["server_host"] = host_var.get().strip()
-        config["server_port"] = port
-        config["device_name"] = name_var.get().strip()
-        config["auto_connect"] = auto_var.get()
+        config["device_name"] = name
+        config["auto_start"] = auto_var.get()
         save_config(config)
         root.destroy()
 
@@ -260,6 +294,269 @@ def run_settings_ui():
 
 
 # ──────────────────────────────────────────────
+#  PeerNode — mesh düğümü (mDNS + WebSocket server/client)
+# ──────────────────────────────────────────────
+
+def get_local_ip() -> str:
+    """LAN IP'sini al (loopback değil)."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+
+
+class PeerNode:
+    """
+    Her cihazda çalışan mesh düğümü:
+      - WebSocket server olarak gelen bağlantıları kabul eder
+      - mDNS ile kendini yayınlar (_sharedclipboard._tcp.local.)
+      - mDNS ile diğerlerini arar, küçük peer_id büyüğe outbound bağlanır
+      - Yeni clipboard mesajını tüm bağlı peer'lere yayar
+    """
+
+    def __init__(self, device_name: str, on_remote_clipboard, on_peers_changed):
+        self.device_name = device_name
+        self.peer_id = uuid.uuid4().hex
+        self.on_remote_clipboard = on_remote_clipboard  # (content, sender_name)
+        self.on_peers_changed = on_peers_changed        # (list[str])
+        self.peers = {}  # peer_id -> {"ws": ws, "name": str}
+        self.aiozc = None
+        self.service_info = None
+        self.browser = None
+        self.server = None
+        self.port = None
+        self.loop = None
+        self._running = False
+
+    def peer_names(self):
+        return [p["name"] for p in self.peers.values()]
+
+    async def start(self):
+        self.loop = asyncio.get_running_loop()
+        self._running = True
+
+        # WebSocket server — 0 = OS uygun bir port atar
+        self.server = await websockets.serve(self._handle_inbound, "0.0.0.0", 0)
+        self.port = self.server.sockets[0].getsockname()[1]
+        log(f"WebSocket server :{self.port} dinlemede")
+
+        # mDNS advertise + browse
+        self.aiozc = AsyncZeroconf(ip_version=IPVersion.V4Only)
+        ip = get_local_ip()
+        # mDNS label'lar nokta/özel karakter alamaz; cihaz adını sanitize et.
+        safe_label = f"{sanitize_label(self.device_name)}-{self.peer_id[:6]}"
+        service_name = f"{safe_label}.{SERVICE_TYPE}"
+        self.service_info = ServiceInfo(
+            SERVICE_TYPE,
+            service_name,
+            addresses=[socket.inet_aton(ip)],
+            port=self.port,
+            properties={
+                b"name": self.device_name.encode("utf-8"),
+                b"id": self.peer_id.encode("utf-8"),
+                b"os": platform.system().encode("utf-8"),
+            },
+            server=f"{safe_label}.local.",
+        )
+        try:
+            await self.aiozc.async_register_service(self.service_info)
+            log(f"mDNS yayını: {service_name} -> {ip}:{self.port}")
+        except Exception as e:
+            log(f"zeroconf register HATASI: {e!r}")
+            raise
+
+        self.browser = AsyncServiceBrowser(
+            self.aiozc.zeroconf,
+            SERVICE_TYPE,
+            handlers=[self._on_service_state_change],
+        )
+        log(f"mDNS browse başladı (peer_id={self.peer_id[:8]})")
+
+    def _on_service_state_change(self, *, zeroconf, service_type, name, state_change):
+        # Zeroconf >=0.130 callback'i keyword-only argümanlarla çağırır.
+        if state_change == ServiceStateChange.Added:
+            asyncio.run_coroutine_threadsafe(
+                self._handle_discovered(service_type, name),
+                self.loop,
+            )
+
+    async def _handle_discovered(self, service_type, name):
+        log(f"mDNS keşfedildi: {name}")
+        try:
+            info = await self.aiozc.async_get_service_info(service_type, name, timeout=3000)
+        except Exception as e:
+            log(f"get_service_info hatası: {e!r}")
+            return
+        if not info or not info.properties:
+            log(f"{name} için boş info/properties")
+            return
+
+        peer_id = info.properties.get(b"id", b"").decode("utf-8", errors="replace")
+        if not peer_id or peer_id == self.peer_id:
+            return
+        # Tie-break: küçük peer_id, büyüğe bağlanır (her çift için tek bağlantı).
+        if self.peer_id >= peer_id:
+            log(f"{peer_id[:8]} bana bağlanacak (tie-break)")
+            return
+        if peer_id in self.peers:
+            return
+
+        addresses = []
+        try:
+            addresses = info.parsed_addresses()
+        except Exception:
+            pass
+        if not addresses:
+            for a in info.addresses or []:
+                try:
+                    addresses.append(socket.inet_ntoa(a))
+                except Exception:
+                    pass
+        if not addresses:
+            log(f"{name} için adres çözülemedi")
+            return
+        host = addresses[0]
+        port = info.port
+        peer_name = info.properties.get(b"name", b"?").decode("utf-8", errors="replace")
+
+        log(f"outbound bağlanılıyor: {peer_name} @ {host}:{port}")
+        try:
+            ws = await asyncio.wait_for(
+                websockets.connect(f"ws://{host}:{port}"),
+                timeout=5,
+            )
+        except Exception as e:
+            log(f"outbound başarısız: {e!r}")
+            return
+
+        try:
+            await ws.send(json.dumps({
+                "type": "hello",
+                "id": self.peer_id,
+                "name": self.device_name,
+            }))
+        except Exception:
+            await ws.close()
+            return
+
+        log(f"outbound bağlandı: {peer_name} ({peer_id[:8]})")
+        self._add_peer(peer_id, ws, peer_name)
+        try:
+            async for raw in ws:
+                self._dispatch_message(raw, peer_id)
+        except Exception:
+            pass
+        finally:
+            log(f"outbound koptu: {peer_name}")
+            self._remove_peer(peer_id)
+
+    async def _handle_inbound(self, ws):
+        try:
+            first = await asyncio.wait_for(ws.recv(), timeout=5)
+            data = json.loads(first)
+        except Exception:
+            await ws.close()
+            return
+
+        if data.get("type") != "hello":
+            await ws.close()
+            return
+
+        peer_id = data.get("id", "")
+        peer_name = data.get("name", "?")
+        if not peer_id or peer_id == self.peer_id:
+            await ws.close()
+            return
+        if peer_id in self.peers:
+            await ws.close()
+            return
+
+        log(f"inbound bağlandı: {peer_name} ({peer_id[:8]})")
+        self._add_peer(peer_id, ws, peer_name)
+        try:
+            async for raw in ws:
+                self._dispatch_message(raw, peer_id)
+        except Exception:
+            pass
+        finally:
+            log(f"inbound koptu: {peer_name}")
+            self._remove_peer(peer_id)
+
+    def _add_peer(self, peer_id, ws, name):
+        self.peers[peer_id] = {"ws": ws, "name": name}
+        try:
+            self.on_peers_changed(self.peer_names())
+        except Exception:
+            pass
+
+    def _remove_peer(self, peer_id):
+        if self.peers.pop(peer_id, None) is not None:
+            try:
+                self.on_peers_changed(self.peer_names())
+            except Exception:
+                pass
+
+    def _dispatch_message(self, raw, peer_id):
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return
+        if data.get("type") == "clipboard":
+            content = data.get("content", "")
+            sender = self.peers.get(peer_id, {}).get("name", "?")
+            try:
+                self.on_remote_clipboard(content, sender)
+            except Exception:
+                pass
+
+    async def broadcast_clipboard(self, content: str):
+        if not self.peers:
+            return
+        msg = json.dumps({
+            "type": "clipboard",
+            "content": content,
+            "sender": self.device_name,
+        })
+        dead = []
+        for pid, info in list(self.peers.items()):
+            try:
+                await info["ws"].send(msg)
+            except Exception:
+                dead.append(pid)
+        for pid in dead:
+            self._remove_peer(pid)
+
+    async def stop(self):
+        self._running = False
+        if self.browser:
+            try:
+                await self.browser.async_cancel()
+            except Exception:
+                pass
+        if self.aiozc:
+            try:
+                if self.service_info:
+                    await self.aiozc.async_unregister_service(self.service_info)
+                await self.aiozc.async_close()
+            except Exception:
+                pass
+        for info in list(self.peers.values()):
+            try:
+                await info["ws"].close()
+            except Exception:
+                pass
+        self.peers.clear()
+        if self.server:
+            self.server.close()
+            try:
+                await self.server.wait_closed()
+            except Exception:
+                pass
+
+
+# ──────────────────────────────────────────────
 #  Ana uygulama
 # ──────────────────────────────────────────────
 
@@ -267,59 +564,71 @@ class SharedClipboardApp:
     def __init__(self):
         self.config = load_config()
         self.clipboard = ClipboardHandler()
-        self.connected = False
-        self.connected_clients = []
+        self.peer_names = []
         self.last_hash = ""
         self.remote_hash = ""
         self.running = True
-        self.ws = None
-        self.loop = None
-        self.connection_thread = None
-        self.history = []  # son kopyalananlar
+        self.history = []
         self._settings_proc = None
+        self.node = None
+        self.loop = None
+        self.loop_thread = None
 
-        # Tray ikonu
         self.icon = Icon(
             "SharedClipboard",
             create_icon_image(status_color="#999"),
-            title="Shared Clipboard — Bağlı değil",
+            title="Shared Clipboard — Yayında değil",
             menu=self._build_menu(),
         )
 
+    # ── Menü ──
+
     def _build_menu(self):
+        if self.peer_names:
+            peers_label = f"Bağlı cihazlar: {len(self.peer_names)}"
+            peer_items = [MenuItem(n, None, enabled=False) for n in self.peer_names]
+        else:
+            peers_label = "Bağlı cihaz yok"
+            peer_items = [MenuItem("(kimse bulunamadı)", None, enabled=False)]
+
         history_items = (
             [MenuItem("(boş)", None, enabled=False)] if not self.history
             else [MenuItem(h[:50], None, enabled=False) for h in self.history[-5:]]
         )
+
         return Menu(
             MenuItem("Ayarlar", self._open_settings),
-            MenuItem(
-                "Bağlan" if not self.connected else "Bağlantıyı Kes",
-                self._toggle_from_menu,
-            ),
             Menu.SEPARATOR,
+            MenuItem(peers_label, Menu(*peer_items)),
             MenuItem("Son Kopyalananlar", Menu(*history_items)),
             Menu.SEPARATOR,
             MenuItem("Çıkış", self._quit),
         )
 
     def _update_menu(self):
-        self.icon.menu = self._build_menu()
+        try:
+            self.icon.menu = self._build_menu()
+            self.icon.update_menu()
+        except Exception:
+            pass
 
     def _update_icon(self, status):
         colors = {
-            "connected": "#4CAF50",     # yeşil
-            "disconnected": "#999",     # gri
-            "receiving": "#2196F3",     # mavi
-            "error": "#f44336",         # kırmızı
+            "online": "#4CAF50",
+            "offline": "#999",
+            "receiving": "#2196F3",
+            "error": "#f44336",
         }
-        self.icon.icon = create_icon_image(status_color=colors.get(status, "#999"))
+        try:
+            self.icon.icon = create_icon_image(status_color=colors.get(status, "#999"))
+        except Exception:
+            pass
+
+    # ── Menü eylemleri ──
 
     def _open_settings(self):
-        # macOS'ta tkinter'ı aynı process'te (ve non-main thread'de) açmak
-        # crash'e yol açar. Settings UI'ı ayrı bir process'te başlatıyoruz.
         if self._settings_proc and self._settings_proc.poll() is None:
-            return  # zaten açık
+            return
         if getattr(sys, "frozen", False):
             args = [sys.executable, "--settings"]
         else:
@@ -335,163 +644,143 @@ class SharedClipboardApp:
             self._settings_proc.wait()
         except Exception:
             return
-        # Settings kapandı: config'i yeniden yükle ve menüyü güncelle
-        self.config = load_config()
-        self._update_menu()
-
-    def _toggle_from_menu(self):
-        if self.connected:
-            self.disconnect()
+        # device_name değişmiş olabilir: node'u yeniden başlat
+        new_config = load_config()
+        if new_config.get("device_name") != self.config.get("device_name"):
+            self.config = new_config
+            self._restart_node()
         else:
-            self.start_connection()
+            self.config = new_config
+        self._update_menu()
 
     def _quit(self):
         self.running = False
-        self.disconnect()
-        self.icon.stop()
+        self._stop_node()
+        try:
+            self.icon.stop()
+        except Exception:
+            pass
 
-    # ── Bağlantı yönetimi ──
+    # ── Node yönetimi ──
 
-    def content_hash(self, text: str) -> str:
-        return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    def start_node(self):
+        if self.loop_thread and self.loop_thread.is_alive():
+            return
+        self.loop_thread = threading.Thread(target=self._run_async_loop, daemon=True)
+        self.loop_thread.start()
 
-    def start_connection(self):
-        if not self.config["server_host"]:
-            # macOS'ta non-main thread'den tkinter messagebox crash verir;
-            # native bildirim ve tray title üzerinden uyaralım.
-            self.icon.title = "Shared Clipboard — Önce Ayarlar'dan IP girin"
+    def _restart_node(self):
+        self._stop_node()
+        # Loop thread'inin kapanmasını bekle, sonra yeniden başlat
+        if self.loop_thread:
+            self.loop_thread.join(timeout=3)
+        self.loop_thread = None
+        self.start_node()
+
+    def _stop_node(self):
+        if self.node and self.loop:
             try:
-                self.icon.notify(
-                    "Önce Ayarlar'dan sunucu IP adresini girin.",
-                    "Shared Clipboard",
-                )
+                fut = asyncio.run_coroutine_threadsafe(self.node.stop(), self.loop)
+                fut.result(timeout=3)
             except Exception:
                 pass
-            return
-
-        self.connection_thread = threading.Thread(target=self._run_async_loop, daemon=True)
-        self.connection_thread.start()
+        if self.loop:
+            try:
+                self.loop.call_soon_threadsafe(self.loop.stop)
+            except Exception:
+                pass
 
     def _run_async_loop(self):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
-        self.loop.run_until_complete(self._connect_loop())
+        try:
+            self.loop.run_until_complete(self._async_main())
+        except Exception as e:
+            print(f"[App] loop hatası: {e}")
+        finally:
+            try:
+                self.loop.close()
+            except Exception:
+                pass
 
-    async def _connect_loop(self):
-        host = self.config["server_host"]
-        port = self.config["server_port"]
-        url = f"ws://{host}:{port}"
+    async def _async_main(self):
+        log(f"=== SharedClipboard başlıyor — cihaz: {self.config['device_name']} ===")
+        self.node = PeerNode(
+            device_name=self.config["device_name"],
+            on_remote_clipboard=self._on_remote_clipboard,
+            on_peers_changed=self._on_peers_changed,
+        )
+        try:
+            await self.node.start()
+        except Exception as e:
+            log(f"node start HATASI: {e!r}")
+            self._update_icon("error")
+            return
 
+        self._update_icon("online")
+        self.icon.title = f"Shared Clipboard — {self.config['device_name']}"
+        self._update_menu()
+
+        try:
+            await self._watch_clipboard()
+        finally:
+            await self.node.stop()
+
+    async def _watch_clipboard(self):
+        interval = self.config.get("polling_ms", 300) / 1000
         while self.running:
             try:
-                async with websockets.connect(url) as ws:
-                    self.ws = ws
-                    self.connected = True
-                    self._update_icon("connected")
-                    self.icon.title = f"Shared Clipboard — {host}:{port}"
-                    self._update_menu()
-
-                    await ws.send(json.dumps({
-                        "type": "register",
-                        "name": self.config["device_name"],
-                        "os": platform.system(),
-                    }))
-
-                    await asyncio.gather(
-                        self._watch_clipboard(ws),
-                        self._listen_server(ws),
-                        self._keepalive(ws),
-                    )
-            except (ConnectionRefusedError, OSError):
-                self._update_icon("error")
-                self.icon.title = "Shared Clipboard — Bağlantı hatası"
-                self.connected = False
-                self._update_menu()
-                await asyncio.sleep(5)
-            except websockets.exceptions.ConnectionClosed:
-                self.connected = False
-                self._update_icon("disconnected")
-                self._update_menu()
-                await asyncio.sleep(2)
-
-    async def _watch_clipboard(self, ws):
-        interval = self.config.get("polling_ms", 300) / 1000
-        while self.running and self.connected:
-            try:
                 current = self.clipboard.get()
-                h = self.content_hash(current)
-                if h != self.last_hash and h != self.remote_hash and current.strip():
+                h = self._content_hash(current)
+                if (h != self.last_hash
+                        and h != self.remote_hash
+                        and current.strip()):
                     self.last_hash = h
-                    await ws.send(json.dumps({
-                        "type": "clipboard",
-                        "content": current,
-                    }))
+                    await self.node.broadcast_clipboard(current)
                     self.history.append(current)
                     if len(self.history) > 20:
                         self.history = self.history[-20:]
                     self._update_menu()
-            except websockets.exceptions.ConnectionClosed:
-                break
             except Exception:
                 pass
             await asyncio.sleep(interval)
 
-    async def _listen_server(self, ws):
-        try:
-            async for raw in ws:
-                try:
-                    data = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
+    # ── Callback'ler ──
 
-                if data.get("type") == "clipboard_update":
-                    content = data["content"]
-                    h = data.get("hash", "")
-                    self.remote_hash = h
-                    self.last_hash = h
-                    self.clipboard.set(content)
-                    self.history.append(content)
-                    if len(self.history) > 20:
-                        self.history = self.history[-20:]
-                    self._update_icon("receiving")
-                    self.icon.title = f"📥 {data.get('sender', '?')}: {content[:40]}"
-                    self._update_menu()
-                    await asyncio.sleep(0.5)
-                    self._update_icon("connected")
-
-                elif data.get("type") == "client_list":
-                    self.connected_clients = data.get("clients", [])
-                    names = ", ".join(c["name"] for c in self.connected_clients)
-                    self.icon.title = f"Shared Clipboard — {names}"
-                    self._update_menu()
-
-        except websockets.exceptions.ConnectionClosed:
-            self.connected = False
-
-    async def _keepalive(self, ws):
-        while self.running and self.connected:
-            try:
-                await ws.send(json.dumps({"type": "ping"}))
-            except Exception:
-                break
-            await asyncio.sleep(30)
-
-    def disconnect(self):
-        self.connected = False
-        if self.ws:
-            try:
-                asyncio.run_coroutine_threadsafe(self.ws.close(), self.loop)
-            except Exception:
-                pass
-        self._update_icon("disconnected")
-        self.icon.title = "Shared Clipboard — Bağlı değil"
+    def _on_remote_clipboard(self, content: str, sender: str):
+        h = self._content_hash(content)
+        self.remote_hash = h
+        self.last_hash = h
+        self.clipboard.set(content)
+        self.history.append(content)
+        if len(self.history) > 20:
+            self.history = self.history[-20:]
+        self._update_icon("receiving")
+        self.icon.title = f"📥 {sender}: {content[:40]}"
         self._update_menu()
 
-    # ── Başlat ──
+        # Kısa süre sonra normal duruma dön (UI thread'inde tetiklemek için timer)
+        threading.Timer(0.6, lambda: self._update_icon("online")).start()
+
+    def _on_peers_changed(self, names):
+        self.peer_names = names
+        if names:
+            self.icon.title = f"Shared Clipboard — {len(names)} cihaz bağlı"
+        else:
+            self.icon.title = f"Shared Clipboard — {self.config['device_name']}"
+        self._update_menu()
+
+    # ── Yardımcı ──
+
+    @staticmethod
+    def _content_hash(text: str) -> str:
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+    # ── Çalıştır ──
 
     def run(self):
-        if self.config["auto_connect"] and self.config["server_host"]:
-            self.start_connection()
+        if self.config.get("auto_start", True):
+            self.start_node()
         self.icon.run()
 
 
