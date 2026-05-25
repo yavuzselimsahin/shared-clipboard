@@ -19,9 +19,6 @@ jobs:
           - os: macos-14
             label: macos-arm64
             asset: SharedClipboard-macos-arm64.zip
-          - os: macos-13
-            label: macos-x86_64
-            asset: SharedClipboard-macos-x86_64.zip
           - os: windows-latest
             label: windows-x64
             asset: SharedClipboard-windows-x64.zip

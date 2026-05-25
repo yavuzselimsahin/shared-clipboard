@@ -21,6 +21,14 @@ import os
 import plistlib
 import zipfile
 
+# Windows CI runner'larında stdout cp1252 olur ve emoji'li print'ler patlar.
+# Python 3.7+ stream reconfigure desteği var.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except (AttributeError, ValueError):
+    pass
+
 
 BUNDLE_ID = "com.yavuzselimsahin.sharedclipboard"
 

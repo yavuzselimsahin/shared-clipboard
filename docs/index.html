@@ -131,8 +131,8 @@
   <ul id="all-assets" class="alt-list"></ul>
 
   <div class="note" id="mac-note" hidden>
-    Mac için indirme düğmesi varsayılan olarak <strong>Apple Silicon (M1/M2/M3/M4)</strong> sürümünü gösteriyor.
-    Eski bir <strong>Intel Mac</strong>'in varsa <a href="#" id="intel-link">Intel sürümünü</a> indir.
+    Mac sürümü yalnızca <strong>Apple Silicon (M1/M2/M3/M4)</strong> için derleniyor.
+    Intel Mac şu an desteklenmiyor.
   </div>
 
   <h2>Nasıl çalışır?</h2>
@@ -221,7 +221,6 @@ async function init() {
   const meta = document.getElementById("meta");
   const list = document.getElementById("all-assets");
   const macNote = document.getElementById("mac-note");
-  const intelLink = document.getElementById("intel-link");
 
   try {
     const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
@@ -258,11 +257,8 @@ async function init() {
     ).join("");
 
     if (os === "mac") {
-      const intel = assets.find(a => /x86_64/i.test(a.name));
-      if (intel) {
-        macNote.hidden = false;
-        intelLink.href = intel.browser_download_url;
-      }
+      // Intel Mac kullanıcısı uyarısı — UA mimari söylemediği için her Mac'e göster.
+      macNote.hidden = false;
     }
   } catch (e) {
     btn.textContent = "Sürüm bilgisi alınamadı";
