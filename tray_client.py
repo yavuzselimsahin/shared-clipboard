@@ -12,7 +12,7 @@ Linux ek:
     sudo apt install xclip python3-tk
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 import asyncio
 import json
