@@ -1,100 +1,97 @@
-# 📋 Shared Clipboard — Ağ İçi Ortak Pano
+# 📋 Shared Clipboard
 
-Aynı yerel ağdaki bilgisayarlar arasında clipboard (pano) paylaşımı.
-Bir cihazda Ctrl+C yaptığınızda içerik tüm bağlı cihazlarda anında görünür.
+Aynı Wi-Fi'daki bilgisayarlar arasında otomatik clipboard paylaşımı.
+Birinde `Cmd/Ctrl+C` yaptığında içerik diğer tüm cihazlarda hazır olur.
+**Sunucu yok, hesap yok, internete açılmıyor** — cihazlar birbirini mDNS ile
+otomatik bulup doğrudan WebSocket'le konuşur.
 
-## Gereksinimler
+## İndir
 
-- Python 3.8+
-- `websockets` kütüphanesi
+👉 **<https://yavuzselimsahin.github.io/shared-clipboard/>**
 
-### Platforma Özel
+Sayfa işletim sistemine uygun yapıyı sana otomatik gösterir. Manuel indirme:
+[GitHub Releases](https://github.com/yavuzselimsahin/shared-clipboard/releases)
 
-| Platform | Ek Gereksinim |
-|----------|---------------|
-| Windows  | Yok (ctypes ile çalışır) |
-| macOS    | Yok (pbcopy/pbpaste zaten var) |
-| Linux X11| `sudo apt install xclip` |
-| Linux Wayland | `sudo apt install wl-clipboard` |
+İlk açılışta yapılması gerekenler (Gatekeeper, Yerel Ağ izni, SmartScreen)
+landing page'de adım adım yazılı.
 
-## Kurulum (Her Makinede)
+## Nasıl çalışır?
+
+```
+   Cihaz A  ↔  Cihaz B
+      ↕        ↕
+      ────  Cihaz C ────
+```
+
+Her cihaz:
+1. Açıldığında kendini `_sharedclipboard._tcp.local.` servisi olarak mDNS'le ilan eder
+2. Aynı servisi yayınlayan diğer cihazları arar
+3. Bulduğu her cihaza WebSocket'le bağlanır (mesh)
+4. Pano değişirse tüm bağlı peer'lere içeriği yayınlar
+
+Her şey yerel ağda; trafik **şifresizdir** — açık/halka açık Wi-Fi'da kullanma.
+
+## Platform notları
+
+| Platform | Ekstra |
+|---|---|
+| macOS | Yok (Bonjour yerleşik) |
+| Windows | Yok (zeroconf saf Python) |
+| Linux X11 | `sudo apt install xclip python3-tk libappindicator3-1` |
+| Linux Wayland | `sudo apt install wl-clipboard python3-tk` |
+
+İlk açılışta Windows Defender Firewall ve macOS Yerel Ağ izni soracaktır;
+onaylamadan diğer cihazları bulamaz.
+
+## Geliştirici
+
+### Kaynaktan çalıştır
 
 ```bash
-git clone <repo> shared-clipboard   # veya dosyaları kopyalayın
+git clone https://github.com/yavuzselimsahin/shared-clipboard.git
 cd shared-clipboard
 pip install -r requirements.txt
+python tray_client.py
 ```
 
-## Kullanım
+### Tek MacBook'la test
 
-### 1. Sunucuyu Başlatın (bir makine seçin)
+Mesh mimaride iki gerçek istemci aynı makinede echo loop yapar.
+Sahte peer scripti onun yerine geçer:
 
 ```bash
-python server.py
+python tray_client.py           # bir terminalde gerçek istemci
+python test_peer.py             # başka terminalde sahte ikinci cihaz
 ```
 
-Varsayılan olarak `0.0.0.0:8765` dinler. Port değiştirmek için:
+`test_peer.py` kendi panosunu değiştirmez; sadece zeroconf ile keşfedip
+mesajları rapor eder.
+
+### Local build
 
 ```bash
-python server.py --port 9000
+python build.py
 ```
 
-### 2. İstemcileri Başlatın (tüm makinelerde)
+Çıktı `dist/SharedClipboard-<platform>-<arch>.zip` olarak hazırlanır.
+
+### Yeni sürüm çıkarma
 
 ```bash
-# Sunucu IP adresini belirtin
-python client.py --server 192.168.1.100
-
-# Özel isim verin
-python client.py --server 192.168.1.100 --name "Ofis-PC"
-
-# Farklı port
-python client.py --server 192.168.1.100 --port 9000
+# 1) tray_client.py içinde __version__ değerini bump et
+# 2) commit
+git commit -am "release: v0.2.0"
+# 3) tag at ve push
+git tag v0.2.0
+git push && git push --tags
 ```
 
-> 💡 Sunucu IP adresini öğrenmek için:
-> - Windows: `ipconfig`
-> - Linux/macOS: `ip addr` veya `ifconfig`
+GitHub Actions otomatik olarak macOS arm64 + macOS Intel + Windows x64 build'lerini
+alır ve [Releases](https://github.com/yavuzselimsahin/shared-clipboard/releases) sayfasına
+ZIP'leri ekler. Landing page de en son release'i otomatik gösterir.
 
-### 3. Kullanın!
+CI tag adıyla `__version__`'ı karşılaştırır; eşleşmezse build başarısız olur.
 
-Herhangi bir cihazda bir şey kopyalayın (Ctrl+C) → Tüm cihazlarda yapıştırabilirsiniz (Ctrl+V).
+## Lisans
 
-## Mimari
-
-```
-┌──────────┐     WebSocket     ┌──────────────┐     WebSocket     ┌──────────┐
-│ Client A ├───────────────────┤    Server    ├───────────────────┤ Client B │
-│ (Win)    │                   │ (herhangi   │                   │ (Linux)  │
-└──────────┘                   │  bir makine)│                   └──────────┘
-                               └──────┬───────┘
-                                      │ WebSocket
-                               ┌──────┴───────┐
-                               │   Client C   │
-                               │   (macOS)    │
-                               └──────────────┘
-```
-
-- İstemci, clipboard'u her 300ms'de kontrol eder
-- Değişiklik varsa sunucuya gönderir
-- Sunucu tüm diğer istemcilere broadcast eder
-- Döngü engelleme: sunucudan gelen içerik tekrar gönderilmez
-
-## Güvenlik Uyarısı
-
-⚠️ Bu proje **yerel ağ** kullanımı için tasarlanmıştır.
-Trafik şifrelenmemiştir (ws://, wss:// değil).
-İnternete açmayın. Güvenli olmayan ağlarda kullanmayın.
-
-Şifreleme eklemek isterseniz:
-- SSL sertifikası oluşturun
-- `websockets.serve` ve `websockets.connect` çağrılarına `ssl` parametresi ekleyin
-
-## Sorun Giderme
-
-| Sorun | Çözüm |
-|-------|-------|
-| `ConnectionRefused` | Sunucu çalışıyor mu? IP doğru mu? Firewall port 8765'i engelliyor mu? |
-| Linux'ta clipboard çalışmıyor | `xclip` veya `wl-clipboard` yükleyin |
-| Sürekli kopuyor | Ağ bağlantınızı kontrol edin, farklı port deneyin |
-| İçerik geç geliyor | Polling aralığını `client.py`'de `asyncio.sleep(0.3)` satırından ayarlayın |
+MIT

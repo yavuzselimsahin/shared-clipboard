@@ -18,6 +18,7 @@ import subprocess
 import platform
 import sys
 import os
+import zipfile
 
 
 def build():
@@ -52,18 +53,57 @@ def build():
     ]
     subprocess.run(client_cmd, check=True)
 
+    print("\n🗜️  ZIP paketleniyor...")
+    asset = _package_asset(system)
+
     print("\n" + "=" * 50)
     print("✅ Paketleme tamamlandı!")
-    print(f"   Çıktı: {os.path.abspath('dist')}")
+    print(f"   Çıktı: dist/{asset}")
     print("=" * 50)
 
     print("""
 Dağıtım:
-  1. dist/SharedClipboard(.app/.exe) → arkadaşına gönder
+  1. dist/<asset>.zip → arkadaşına gönder (AirDrop/WeTransfer/Drive)
   2. Aynı Wi-Fi'a bağlı her cihazda aç — birbirini otomatik bulur
   3. macOS'ta ilk açılışta "İnternetten gelen yazılım" uyarısı çıkabilir,
      sağ tık → Aç ile geç (veya Sistem Ayarları → Gizlilik & Güvenlik)
 """)
+
+
+def _package_asset(system: str) -> str:
+    """PyInstaller çıktısını platform-named ZIP'e koyar.
+
+    macOS: sistem `zip -ry` kullanılır; .app içindeki symlink + exec bit'leri
+    Python `zipfile` taşımıyor, bundle bozulur.
+    Windows/Linux: tek dosyalık çıktı; `zipfile.ZIP_DEFLATED` yeterli.
+    """
+    machine = platform.machine().lower()
+
+    if system == "Darwin":
+        arch = "arm64" if machine == "arm64" else "x86_64"
+        asset = f"SharedClipboard-macos-{arch}.zip"
+        subprocess.run(
+            ["zip", "-ry", asset, "SharedClipboard.app"],
+            cwd="dist", check=True,
+        )
+        return asset
+
+    if system == "Windows":
+        asset = "SharedClipboard-windows-x64.zip"
+        src = os.path.join("dist", "SharedClipboard.exe")
+        dst = os.path.join("dist", asset)
+        with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.write(src, arcname="SharedClipboard.exe")
+        return asset
+
+    # Linux
+    arch = "x86_64" if machine in ("x86_64", "amd64") else machine
+    asset = f"SharedClipboard-linux-{arch}.zip"
+    src = os.path.join("dist", "SharedClipboard")
+    dst = os.path.join("dist", asset)
+    with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(src, arcname="SharedClipboard")
+    return asset
 
 
 if __name__ == "__main__":

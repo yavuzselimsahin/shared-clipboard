@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Shared Clipboard — Yerel ağda ortak pano</title>
+<meta name="description" content="Aynı Wi-Fi'daki bilgisayarlar arasında otomatik clipboard paylaşımı. Sunucu yok, hesap yok, internete açılmıyor.">
+<style>
+  :root {
+    --fg: #111;
+    --muted: #666;
+    --bg: #fafafa;
+    --card: #fff;
+    --accent: #2b6cb0;
+    --accent-hover: #234e85;
+    --border: #e5e5e5;
+    --warn-bg: #fff7e1;
+    --warn-border: #f0c419;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+    line-height: 1.55;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 64px 24px 96px; }
+  header { margin-bottom: 2.2em; }
+  h1 {
+    font-size: clamp(2rem, 6vw, 2.6rem);
+    margin: 0 0 .3em;
+    letter-spacing: -0.01em;
+  }
+  .tag {
+    color: var(--muted);
+    font-size: 1.1rem;
+    margin: 0;
+  }
+  .download {
+    display: inline-block;
+    background: var(--accent);
+    color: #fff;
+    padding: 14px 28px;
+    font-size: 1.05rem;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 600;
+    transition: background .15s ease;
+  }
+  .download:hover { background: var(--accent-hover); }
+  .download[aria-disabled="true"] { opacity: .55; pointer-events: none; }
+  .meta {
+    margin-top: .6em;
+    color: var(--muted);
+    font-size: .9rem;
+  }
+  .alt-list {
+    margin: 1em 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: .92rem;
+    color: var(--muted);
+  }
+  .alt-list li { margin: .25em 0; }
+  .alt-list a { color: var(--accent); text-decoration: none; }
+  .alt-list a:hover { text-decoration: underline; }
+  .note {
+    background: var(--warn-bg);
+    border-left: 4px solid var(--warn-border);
+    padding: 10px 14px;
+    border-radius: 4px;
+    margin: 1.4em 0;
+    font-size: .95rem;
+  }
+  h2 {
+    margin-top: 3em;
+    font-size: 1.35rem;
+    letter-spacing: -0.005em;
+  }
+  details {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: .8em 0;
+  }
+  details summary {
+    font-weight: 600;
+    cursor: pointer;
+    list-style: none;
+  }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before {
+    content: "▸ ";
+    color: var(--accent);
+    display: inline-block;
+    transition: transform .15s ease;
+  }
+  details[open] summary::before { content: "▾ "; }
+  ol, ul { padding-left: 1.2em; }
+  code, pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .92em;
+    background: #efefef;
+    padding: .12em .35em;
+    border-radius: 4px;
+  }
+  pre { padding: 10px 14px; overflow-x: auto; }
+  footer {
+    margin-top: 4em;
+    padding-top: 1.5em;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: .88rem;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>📋 Shared Clipboard</h1>
+    <p class="tag">Aynı Wi-Fi'daki cihazlarda ortak pano. Birinde kopyala, hepsinde yapıştır.</p>
+  </header>
+
+  <a id="primary" class="download" href="#" aria-disabled="true">Sürüm yükleniyor…</a>
+  <div id="meta" class="meta"></div>
+
+  <ul id="all-assets" class="alt-list"></ul>
+
+  <div class="note" id="mac-note" hidden>
+    Mac için indirme düğmesi varsayılan olarak <strong>Apple Silicon (M1/M2/M3/M4)</strong> sürümünü gösteriyor.
+    Eski bir <strong>Intel Mac</strong>'in varsa <a href="#" id="intel-link">Intel sürümünü</a> indir.
+  </div>
+
+  <h2>Nasıl çalışır?</h2>
+  <p>
+    Menü çubuğunda / sistem tepsinde çalışır. Aynı Wi-Fi'daki her cihaz kendini
+    <code>mDNS (Bonjour)</code> ile yayınlar; cihazlar birbirine doğrudan
+    <code>WebSocket</code>'le bağlanır. Ortada sunucu yok, hesap yok,
+    veri yerel ağdan çıkmıyor.
+  </p>
+
+  <h2>İlk açılışta yapılacaklar</h2>
+
+  <details open>
+    <summary>macOS — "Açılamıyor" uyarısı</summary>
+    <ol>
+      <li>ZIP'i aç → <code>SharedClipboard.app</code>'ı <code>/Applications</code> klasörüne taşı.</li>
+      <li><strong>Sağ tık → Aç</strong> → açılan dialog'da tekrar <strong>Aç</strong>.
+      <br>(Çift tıklama ilk seferde çalışmaz; bu yapı imzalı değil.)</li>
+      <li>macOS 14+ ise <em>"…yerel ağındaki cihazları bulmak istiyor"</em> izni çıkacak → <strong>İzin Ver</strong>.
+      <br>Kaçırırsan: Sistem Ayarları → Gizlilik &amp; Güvenlik → Yerel Ağ → <em>SharedClipboard</em>'u aç.</li>
+      <li>Hâlâ açılmıyorsa Terminal'de:
+        <pre>xattr -dr com.apple.quarantine /Applications/SharedClipboard.app</pre>
+      </li>
+    </ol>
+  </details>
+
+  <details>
+    <summary>Windows — SmartScreen ve Firewall</summary>
+    <ol>
+      <li>ZIP'i aç. <code>SharedClipboard.exe</code>'yi çalıştır.</li>
+      <li>Mavi SmartScreen ekranında <strong>Daha fazla bilgi</strong> → <strong>Yine de çalıştır</strong>.
+      <br>(İmzalı değil; bu nedenle uyarı çıkıyor.)</li>
+      <li>Windows Defender Firewall iki kez izin soracak (mDNS keşfi ve WebSocket portu için) → <strong>Özel ağlar</strong>'ı işaretle ve <strong>İzin Ver</strong>.</li>
+    </ol>
+  </details>
+
+  <details>
+    <summary>Linux — clipboard araçları</summary>
+    <ol>
+      <li>X11: <code>sudo apt install xclip python3-tk libappindicator3-1</code></li>
+      <li>Wayland: <code>sudo apt install wl-clipboard python3-tk</code></li>
+      <li>İndirilen dosyayı çalıştırılabilir yap: <code>chmod +x SharedClipboard</code></li>
+    </ol>
+  </details>
+
+  <h2>Güvenlik notu</h2>
+  <p>
+    Trafik yerel ağda <strong>şifresiz</strong> akıyor (TLS yok).
+    Bu uygulamayı yalnızca güvendiğin ev/ofis Wi-Fi'larında kullan.
+    Açık veya halka açık ağlarda <em>çalıştırma</em>.
+  </p>
+
+  <footer>
+    Kaynak kod ve sürüm geçmişi:
+    <a href="https://github.com/yavuzselimsahin/shared-clipboard">github.com/yavuzselimsahin/shared-clipboard</a>
+  </footer>
+</main>
+
+<script>
+const REPO = "yavuzselimsahin/shared-clipboard";
+
+function detectOS() {
+  const ua = navigator.userAgent;
+  if (/Windows/i.test(ua)) return "windows";
+  if (/Mac/i.test(ua))     return "mac";   // mimari bilinmiyor — UA spec yalanlar
+  if (/Linux/i.test(ua))   return "linux";
+  return "unknown";
+}
+
+function pickAsset(os, assets) {
+  if (os === "windows") return assets.find(a => /windows.*x64/i.test(a.name));
+  if (os === "mac")     return assets.find(a => /macos.*arm64/i.test(a.name))
+                              || assets.find(a => /macos/i.test(a.name));
+  if (os === "linux")   return assets.find(a => /linux/i.test(a.name));
+  return null;
+}
+
+function fmtSize(bytes) {
+  if (!bytes) return "";
+  const mb = bytes / 1_000_000;
+  return mb < 1 ? `${(bytes/1000).toFixed(0)} KB` : `${mb.toFixed(1)} MB`;
+}
+
+async function init() {
+  const btn = document.getElementById("primary");
+  const meta = document.getElementById("meta");
+  const list = document.getElementById("all-assets");
+  const macNote = document.getElementById("mac-note");
+  const intelLink = document.getElementById("intel-link");
+
+  try {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
+    if (r.status === 404) {
+      btn.textContent = "Henüz sürüm yok — yakında";
+      meta.textContent = "İlk release yayınlandığında bu düğme aktif olacak.";
+      return;
+    }
+    if (!r.ok) throw new Error(`GitHub API ${r.status}`);
+    const rel = await r.json();
+    const assets = (rel.assets || []).filter(a => /\.zip$/i.test(a.name));
+
+    if (!assets.length) {
+      btn.textContent = "Bu sürümde indirilebilir dosya yok";
+      return;
+    }
+
+    const os = detectOS();
+    const picked = pickAsset(os, assets);
+
+    if (picked) {
+      btn.textContent = `İndir — ${picked.name}`;
+      btn.href = picked.browser_download_url;
+      btn.removeAttribute("aria-disabled");
+    } else {
+      btn.textContent = "Aşağıdan platformuna göre seç";
+    }
+
+    const date = new Date(rel.published_at).toLocaleDateString("tr-TR");
+    meta.textContent = `${rel.tag_name} · ${date}`;
+
+    list.innerHTML = "<li><strong>Tüm sürümler:</strong></li>" + assets.map(a =>
+      `<li><a href="${a.browser_download_url}">${a.name}</a> · ${fmtSize(a.size)}</li>`
+    ).join("");
+
+    if (os === "mac") {
+      const intel = assets.find(a => /x86_64/i.test(a.name));
+      if (intel) {
+        macNote.hidden = false;
+        intelLink.href = intel.browser_download_url;
+      }
+    }
+  } catch (e) {
+    btn.textContent = "Sürüm bilgisi alınamadı";
+    meta.innerHTML = `${e.message} — Manuel indirme: ` +
+      `<a href="https://github.com/${REPO}/releases">github.com/${REPO}/releases</a>`;
+  }
+}
+init();
+</script>
+</body>
+</html>

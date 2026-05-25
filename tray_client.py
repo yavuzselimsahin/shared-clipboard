@@ -12,6 +12,8 @@ Linux ek:
     sudo apt install xclip python3-tk
 """
 
+__version__ = "0.1.0"
+
 import asyncio
 import json
 import platform
@@ -645,7 +647,7 @@ class SharedClipboardApp:
         self.icon = Icon(
             "SharedClipboard",
             create_icon_image(status_color="#999"),
-            title="Shared Clipboard — Yayında değil",
+            title=f"Shared Clipboard v{__version__} — Yayında değil",
             menu=Menu(self._menu_items),
         )
 
@@ -665,6 +667,8 @@ class SharedClipboardApp:
         history_submenu = Menu(*self._history_items())
 
         return (
+            MenuItem(f"Shared Clipboard v{__version__}", None, enabled=False),
+            Menu.SEPARATOR,
             MenuItem("Ayarlar", self._open_settings),
             Menu.SEPARATOR,
             MenuItem(peers_label, peer_submenu),
