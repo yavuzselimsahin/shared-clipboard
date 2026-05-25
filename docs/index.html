@@ -146,16 +146,17 @@
   <h2>İlk açılışta yapılacaklar</h2>
 
   <details open>
-    <summary>macOS — "Açılamıyor" uyarısı</summary>
+    <summary>macOS — "Açılamıyor" / "damaged" uyarısı</summary>
     <ol>
       <li>ZIP'i aç → <code>SharedClipboard.app</code>'ı <code>/Applications</code> klasörüne taşı.</li>
       <li><strong>Sağ tık → Aç</strong> → açılan dialog'da tekrar <strong>Aç</strong>.
       <br>(Çift tıklama ilk seferde çalışmaz; bu yapı imzalı değil.)</li>
+      <li>"<strong>SharedClipboard is damaged and can't be opened</strong>" diyorsa
+      Terminal'i aç ve şu komutu yapıştır:
+        <pre>xattr -dr com.apple.quarantine /Applications/SharedClipboard.app</pre>
+      Sonra normal çift tıkla aç.</li>
       <li>macOS 14+ ise <em>"…yerel ağındaki cihazları bulmak istiyor"</em> izni çıkacak → <strong>İzin Ver</strong>.
       <br>Kaçırırsan: Sistem Ayarları → Gizlilik &amp; Güvenlik → Yerel Ağ → <em>SharedClipboard</em>'u aç.</li>
-      <li>Hâlâ açılmıyorsa Terminal'de:
-        <pre>xattr -dr com.apple.quarantine /Applications/SharedClipboard.app</pre>
-      </li>
     </ol>
   </details>
 

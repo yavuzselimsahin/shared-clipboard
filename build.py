@@ -84,6 +84,8 @@ def build():
     if system == "Darwin":
         print("\n🔧 Info.plist'e Yerel Ağ + Bonjour key'leri yazılıyor...")
         _patch_macos_info_plist()
+        print("\n🔏 Ad-hoc codesign uygulanıyor...")
+        _adhoc_codesign()
 
     print("\n🗜️  ZIP paketleniyor...")
     asset = _package_asset(system)
@@ -126,6 +128,27 @@ def _patch_macos_info_plist():
     with open(plist_path, "wb") as f:
         plistlib.dump(plist, f)
     print(f"  ✓ {plist_path} güncellendi")
+
+
+def _adhoc_codesign():
+    """Ad-hoc (sertifika gerektirmeyen) imzalama.
+
+    Apple Developer hesabı + notarization olmadan, sadece Gatekeeper'ın
+    'damaged' mesajını engellemek için. Kullanıcı yine 'kimliği
+    doğrulanamadı' uyarısı görür ama sağ tık → Aç ile geçebilir.
+    """
+    app_path = "dist/SharedClipboard.app"
+    if not os.path.exists(app_path):
+        print(f"  ⚠️  {app_path} yok; atlanıyor")
+        return
+    try:
+        subprocess.run(
+            ["codesign", "--force", "--deep", "--sign", "-", app_path],
+            check=True,
+        )
+        print(f"  ✓ {app_path} ad-hoc imzalandı")
+    except subprocess.CalledProcessError as e:
+        print(f"  ⚠️  codesign başarısız: {e}")
 
 
 def _package_asset(system: str) -> str:
