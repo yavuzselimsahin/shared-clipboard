@@ -42,7 +42,7 @@ jobs:
         shell: bash
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          ver=$(python -c "import re;print(re.search(r'__version__\s*=\s*[\"\\']([^\"\\']+)', open('tray_client.py').read()).group(1))")
+          ver=$(python -c "import re;print(re.search(r'__version__\s*=\s*[\"\\']([^\"\\']+)', open('tray_client.py', encoding='utf-8').read()).group(1))")
           if [ "$tag" != "$ver" ]; then
             echo "::error::Tag $GITHUB_REF_NAME does not match __version__ $ver"
             exit 1
