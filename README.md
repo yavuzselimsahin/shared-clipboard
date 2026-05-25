@@ -1,21 +1,41 @@
-# 📋 Shared Clipboard
+# Shared Clipboard
 
-Aynı Wi-Fi'daki bilgisayarlar arasında otomatik clipboard paylaşımı.
-Birinde `Cmd/Ctrl+C` yaptığında içerik diğer tüm cihazlarda hazır olur.
-**Sunucu yok, hesap yok, internete açılmıyor** — cihazlar birbirini mDNS ile
-otomatik bulup doğrudan WebSocket'le konuşur.
+Aynı yerel ağ üzerindeki bilgisayarlar arasında pano (clipboard) içeriğini
+otomatik olarak eşitleyen bir masaüstü yardımcı uygulamasıdır. Herhangi bir
+cihazda kopyalanan metin, ağdaki diğer tüm cihazlarda anında erişilebilir
+hâle gelir.
 
-## İndir
+Uygulama tamamen yerel ağda çalışır: harici sunucu, kullanıcı hesabı veya
+internet bağlantısı gerektirmez. Cihazlar birbirini mDNS (Bonjour) ile
+keşfeder ve doğrudan WebSocket bağlantısı üzerinden iletişim kurar.
 
-👉 **<https://yavuzselimsahin.github.io/shared-clipboard/>**
+## İndirme
 
-Sayfa işletim sistemine uygun yapıyı sana otomatik gösterir. Manuel indirme:
+Resmî sürümler aşağıdaki adresten edinilebilir:
+
+**<https://yavuzselimsahin.github.io/shared-clipboard/>**
+
+Sayfa, ziyaretçinin işletim sistemine uygun derlemeyi otomatik olarak önerir.
+Manuel indirme için
 [GitHub Releases](https://github.com/yavuzselimsahin/shared-clipboard/releases)
+sayfası kullanılabilir.
 
-İlk açılışta yapılması gerekenler (Gatekeeper, Yerel Ağ izni, SmartScreen)
-landing page'de adım adım yazılı.
+İlk çalıştırmada karşılaşılabilecek sistem uyarıları (macOS Gatekeeper ve
+Yerel Ağ izni, Windows SmartScreen ve Defender Firewall) için ayrıntılı
+yönergeler resmî web sayfasında platform bazında listelenmiştir.
 
-## Nasıl çalışır?
+## Mimari
+
+Her istemci, başlatılmasının ardından şu adımları izler:
+
+1. Kendisini `_sharedclipboard._tcp.local.` servis tipiyle mDNS üzerinde
+   ilan eder.
+2. Aynı servis tipini yayınlayan diğer cihazları sürekli olarak arar.
+3. Keşfettiği her eşe ayrı bir WebSocket bağlantısı kurar (tam-örgü / mesh
+   topoloji).
+4. Yerel pano içeriği değiştiğinde, bağlı olduğu tüm eşlere yeni içeriği
+   yayar.
+5. Diğer eşlerden gelen mesajlardaki içeriği yerel panoya yazar.
 
 ```
    Cihaz A  ↔  Cihaz B
@@ -23,29 +43,25 @@ landing page'de adım adım yazılı.
       ────  Cihaz C ────
 ```
 
-Her cihaz:
-1. Açıldığında kendini `_sharedclipboard._tcp.local.` servisi olarak mDNS'le ilan eder
-2. Aynı servisi yayınlayan diğer cihazları arar
-3. Bulduğu her cihaza WebSocket'le bağlanır (mesh)
-4. Pano değişirse tüm bağlı peer'lere içeriği yayınlar
+Trafiğin tamamı yerel ağ üzerinde **şifrelenmeden** akar. Bu nedenle uygulama
+yalnızca güvenilir ev veya ofis ağlarında kullanılmalıdır; halka açık veya
+parolasız Wi-Fi ağlarında çalıştırılmamalıdır.
 
-Her şey yerel ağda; trafik **şifresizdir** — açık/halka açık Wi-Fi'da kullanma.
+## Platform Gereksinimleri
 
-## Platform notları
+| Platform | Ek bağımlılık |
+| --- | --- |
+| macOS (Apple Silicon) | Yok. Bonjour işletim sistemiyle birlikte gelir. |
+| Windows 10 / 11 (x64) | Yok. zeroconf saf Python ile çalışır. |
+| Linux (X11) | `xclip`, `python3-tk`, `libappindicator3-1` |
+| Linux (Wayland) | `wl-clipboard`, `python3-tk` |
 
-| Platform | Ekstra |
-|---|---|
-| macOS | Yok (Bonjour yerleşik) |
-| Windows | Yok (zeroconf saf Python) |
-| Linux X11 | `sudo apt install xclip python3-tk libappindicator3-1` |
-| Linux Wayland | `sudo apt install wl-clipboard python3-tk` |
+İlk çalıştırmada işletim sistemi, yerel ağ erişimi için kullanıcı onayı
+talep edebilir. Onay verilmediği takdirde diğer cihazlar keşfedilemez.
 
-İlk açılışta Windows Defender Firewall ve macOS Yerel Ağ izni soracaktır;
-onaylamadan diğer cihazları bulamaz.
+## Geliştirme
 
-## Geliştirici
-
-### Kaynaktan çalıştır
+### Kaynak koddan çalıştırma
 
 ```bash
 git clone https://github.com/yavuzselimsahin/shared-clipboard.git
@@ -54,44 +70,29 @@ pip install -r requirements.txt
 python tray_client.py
 ```
 
-### Tek MacBook'la test
+### Tek makinede test
 
-Mesh mimaride iki gerçek istemci aynı makinede echo loop yapar.
-Sahte peer scripti onun yerine geçer:
+Mesh mimaride iki gerçek istemcinin aynı makinede aynı anda çalıştırılması
+yankı (echo) döngüsüne neden olur. Bu durumdan kaçınmak için ikinci istemci
+yerine depo içindeki `test_peer.py` betiği kullanılabilir. Bu yardımcı
+betik kendi panosunu değiştirmeden mesajları zeroconf üzerinden alır ve
+konsola yazdırır.
 
 ```bash
-python tray_client.py           # bir terminalde gerçek istemci
-python test_peer.py             # başka terminalde sahte ikinci cihaz
+python tray_client.py     # gerçek istemci
+python test_peer.py       # sahte ikinci cihaz (ayrı bir terminalde)
 ```
 
-`test_peer.py` kendi panosunu değiştirmez; sadece zeroconf ile keşfedip
-mesajları rapor eder.
-
-### Local build
+### Yerel derleme
 
 ```bash
 python build.py
 ```
 
-Çıktı `dist/SharedClipboard-<platform>-<arch>.zip` olarak hazırlanır.
+Çıktı arşivi `dist/SharedClipboard-<platform>-<arch>.zip` adıyla üretilir.
 
-### Yeni sürüm çıkarma
-
-```bash
-# 1) tray_client.py içinde __version__ değerini bump et
-# 2) commit
-git commit -am "release: v0.2.0"
-# 3) tag at ve push
-git tag v0.2.0
-git push && git push --tags
-```
-
-GitHub Actions otomatik olarak macOS arm64 + macOS Intel + Windows x64 build'lerini
-alır ve [Releases](https://github.com/yavuzselimsahin/shared-clipboard/releases) sayfasına
-ZIP'leri ekler. Landing page de en son release'i otomatik gösterir.
-
-CI tag adıyla `__version__`'ı karşılaştırır; eşleşmezse build başarısız olur.
 
 ## Lisans
 
-MIT
+Bu proje MIT Lisansı ile yayımlanmıştır. Ayrıntılar için [LICENSE](LICENSE)
+dosyasına bakılabilir.
