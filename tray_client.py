@@ -639,40 +639,87 @@ class SharedClipboardApp:
         self.loop = None
         self.loop_thread = None
 
+        # Menu'ya callable ver: pystray menü her açıldığında çağırır,
+        # bu sayede peer listesi / history dinamik olarak güncellenir.
+        # (icon.menu = ... ataması macOS'ta NSMenu'yu rebuild etmez.)
         self.icon = Icon(
             "SharedClipboard",
             create_icon_image(status_color="#999"),
             title="Shared Clipboard — Yayında değil",
-            menu=self._build_menu(),
+            menu=Menu(self._menu_items),
         )
 
     # ── Menü ──
 
-    def _build_menu(self):
+    def _menu_items(self):
+        """pystray menü her açıldığında çağırır; güncel state'i render eder."""
         if self.peer_names:
             peers_label = f"Bağlı cihazlar: {len(self.peer_names)}"
-            peer_items = [MenuItem(n, None, enabled=False) for n in self.peer_names]
+            peer_submenu = Menu(
+                *[MenuItem(n, None, enabled=False) for n in self.peer_names]
+            )
         else:
             peers_label = "Bağlı cihaz yok"
-            peer_items = [MenuItem("(kimse bulunamadı)", None, enabled=False)]
+            peer_submenu = Menu(MenuItem("(kimse bulunamadı)", None, enabled=False))
 
-        history_items = (
-            [MenuItem("(boş)", None, enabled=False)] if not self.history
-            else [MenuItem(h[:50], None, enabled=False) for h in self.history[-5:]]
-        )
+        history_submenu = Menu(*self._history_items())
 
-        return Menu(
+        return (
             MenuItem("Ayarlar", self._open_settings),
             Menu.SEPARATOR,
-            MenuItem(peers_label, Menu(*peer_items)),
-            MenuItem("Son Kopyalananlar", Menu(*history_items)),
+            MenuItem(peers_label, peer_submenu),
+            MenuItem("Son Kopyalananlar", history_submenu),
             Menu.SEPARATOR,
             MenuItem("Çıkış", self._quit),
         )
 
+    def _history_items(self):
+        if not self.history:
+            return [MenuItem("(boş)", None, enabled=False)]
+        items = []
+        # En yenisi en üstte; son 10 kayıt
+        for entry in reversed(self.history[-10:]):
+            label = entry.replace("\r", "").replace("\n", " ⏎ ")
+            if len(label) > 60:
+                label = label[:57] + "..."
+            items.append(MenuItem(label, self._make_history_action(entry)))
+        items.append(Menu.SEPARATOR)
+        items.append(MenuItem("Geçmişi Temizle", self._clear_history))
+        return items
+
+    def _make_history_action(self, entry):
+        # pystray action'ı 0/1/2 arg almalı; closure ile entry'yi yakalıyoruz.
+        def handler(icon, item):
+            self._reuse_history(entry)
+        return handler
+
+    def _reuse_history(self, content: str):
+        """Geçmişten bir item seçildi: panoya yaz ve diğer cihazlara yay."""
+        h = self._content_hash(content)
+        # Kendi watch loop'umuzun aynı içeriği tekrar broadcast etmesini önle
+        self.last_hash = h
+        self.clipboard.set(content)
+        # Async loop'a broadcast iş ekle (menü callback'i UI thread'inde)
+        if self.node and self.loop:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    self.node.broadcast_clipboard(content),
+                    self.loop,
+                )
+            except Exception:
+                pass
+        self._update_icon("receiving")
+        threading.Timer(0.4, lambda: self._update_icon("online")).start()
+
+    def _clear_history(self):
+        self.history.clear()
+        self._update_menu()
+
     def _update_menu(self):
+        # Menu factory pattern kullandığımız için item'lar her açılışta
+        # yeniden üretiliyor. update_menu() backend cache'ini geçersiz kılar
+        # (özellikle Linux/Windows için gerekli; macOS no-op).
         try:
-            self.icon.menu = self._build_menu()
             self.icon.update_menu()
         except Exception:
             pass
