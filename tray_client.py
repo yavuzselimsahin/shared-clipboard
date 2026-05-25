@@ -12,10 +12,11 @@ Linux ek:
     sudo apt install xclip python3-tk
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 import asyncio
 import json
+import locale
 import platform
 import socket
 import hashlib
@@ -94,6 +95,108 @@ def sanitize_label(name: str) -> str:
 
 
 # ──────────────────────────────────────────────
+#  i18n — basit, dosya bağımsız sözlük tabanlı
+# ──────────────────────────────────────────────
+
+LANGUAGES = {
+    "tr": {
+        "lang_name": "Türkçe",
+        # Settings penceresi
+        "settings_title": "Shared Clipboard — Ayarlar",
+        "settings_header": "📋 Shared Clipboard",
+        "settings_subtitle": "Aynı Wi-Fi'daki cihazlar otomatik bulunur.",
+        "settings_device_name": "Cihaz Adı:",
+        "settings_language": "Dil:",
+        "settings_auto_start": "Açılışta otomatik yayına başla",
+        "settings_save": "Kaydet",
+        "settings_cancel": "İptal",
+        "settings_error_title": "Hata",
+        "settings_error_empty_name": "Cihaz adı boş olamaz.",
+        # Tray menüsü
+        "menu_settings": "Ayarlar",
+        "menu_history": "Son Kopyalananlar",
+        "menu_clear_history": "Geçmişi Temizle",
+        "menu_quit": "Çıkış",
+        "menu_history_empty": "(boş)",
+        "menu_peers_none": "Bağlı cihaz yok",
+        "menu_peers_count": "Bağlı cihazlar: {n}",
+        "menu_no_peers_found": "(kimse bulunamadı)",
+        # Tray tooltip / başlık
+        "tooltip_offline": "Shared Clipboard v{v} — Yayında değil",
+        "tooltip_device": "Shared Clipboard — {name}",
+        "tooltip_peers": "Shared Clipboard — {n} cihaz bağlı",
+        "tooltip_received": "📥 {sender}: {content}",
+    },
+    "en": {
+        "lang_name": "English",
+        "settings_title": "Shared Clipboard — Settings",
+        "settings_header": "📋 Shared Clipboard",
+        "settings_subtitle": "Devices on the same Wi-Fi are discovered automatically.",
+        "settings_device_name": "Device name:",
+        "settings_language": "Language:",
+        "settings_auto_start": "Start broadcasting automatically on launch",
+        "settings_save": "Save",
+        "settings_cancel": "Cancel",
+        "settings_error_title": "Error",
+        "settings_error_empty_name": "Device name cannot be empty.",
+        "menu_settings": "Settings",
+        "menu_history": "Recently Copied",
+        "menu_clear_history": "Clear History",
+        "menu_quit": "Quit",
+        "menu_history_empty": "(empty)",
+        "menu_peers_none": "No devices connected",
+        "menu_peers_count": "Connected devices: {n}",
+        "menu_no_peers_found": "(none found)",
+        "tooltip_offline": "Shared Clipboard v{v} — Offline",
+        "tooltip_device": "Shared Clipboard — {name}",
+        "tooltip_peers": "Shared Clipboard — {n} devices connected",
+        "tooltip_received": "📥 {sender}: {content}",
+    },
+}
+
+DEFAULT_LANG = "en"
+_current_lang = DEFAULT_LANG
+
+
+def detect_default_lang() -> str:
+    """Sistem locale'i tr* ile başlıyorsa Türkçe, aksi halde İngilizce."""
+    candidates = [
+        os.environ.get("LANG"),
+        os.environ.get("LC_ALL"),
+        os.environ.get("LC_MESSAGES"),
+    ]
+    try:
+        candidates.append(locale.getlocale()[0])
+    except Exception:
+        pass
+    for c in candidates:
+        if c and c.lower().startswith("tr"):
+            return "tr"
+    return "en"
+
+
+def set_lang(code: str):
+    global _current_lang
+    if code in LANGUAGES:
+        _current_lang = code
+
+
+def current_lang() -> str:
+    return _current_lang
+
+
+def t(key: str, **kwargs) -> str:
+    table = LANGUAGES.get(_current_lang, LANGUAGES[DEFAULT_LANG])
+    s = table.get(key) or LANGUAGES[DEFAULT_LANG].get(key, key)
+    if kwargs:
+        try:
+            return s.format(**kwargs)
+        except Exception:
+            return s
+    return s
+
+
+# ──────────────────────────────────────────────
 #  Ayarlar (JSON dosyasında saklanır)
 # ──────────────────────────────────────────────
 
@@ -115,6 +218,7 @@ def load_config() -> dict:
         "device_name": socket.gethostname(),
         "auto_start": True,
         "polling_ms": 300,
+        "language": detect_default_lang(),
     }
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -330,10 +434,11 @@ def create_icon_image(color="#4CAF50", status_color=None):
 
 def run_settings_ui():
     config = load_config()
+    set_lang(config.get("language", DEFAULT_LANG))
 
     root = tk.Tk()
-    root.title("Shared Clipboard — Ayarlar")
-    root.geometry("420x260")
+    root.title(t("settings_title"))
+    root.geometry("440x300")
     root.resizable(False, False)
 
     style = ttk.Style(root)
@@ -344,19 +449,32 @@ def run_settings_ui():
     main_frame = ttk.Frame(root, padding=20)
     main_frame.pack(fill="both", expand=True)
 
-    ttk.Label(main_frame, text="📋 Shared Clipboard", style="Header.TLabel").pack(anchor="w")
-    ttk.Label(main_frame, text="Aynı Wi-Fi'daki cihazlar otomatik bulunur.").pack(anchor="w")
+    ttk.Label(main_frame, text=t("settings_header"), style="Header.TLabel").pack(anchor="w")
+    ttk.Label(main_frame, text=t("settings_subtitle")).pack(anchor="w")
     ttk.Separator(main_frame, orient="horizontal").pack(fill="x", pady=(5, 15))
 
     form = ttk.Frame(main_frame)
     form.pack(fill="x")
 
-    ttk.Label(form, text="Cihaz Adı:").grid(row=0, column=0, sticky="w", pady=5)
+    ttk.Label(form, text=t("settings_device_name")).grid(row=0, column=0, sticky="w", pady=5)
     name_var = tk.StringVar(value=config["device_name"])
     ttk.Entry(form, textvariable=name_var, width=28).grid(row=0, column=1, pady=5, padx=(10, 0))
 
+    ttk.Label(form, text=t("settings_language")).grid(row=1, column=0, sticky="w", pady=5)
+    lang_display = {code: data["lang_name"] for code, data in LANGUAGES.items()}
+    display_to_code = {v: k for k, v in lang_display.items()}
+    current_code = config.get("language", DEFAULT_LANG)
+    lang_var = tk.StringVar(value=lang_display.get(current_code, lang_display[DEFAULT_LANG]))
+    ttk.Combobox(
+        form,
+        textvariable=lang_var,
+        values=list(lang_display.values()),
+        state="readonly",
+        width=26,
+    ).grid(row=1, column=1, pady=5, padx=(10, 0))
+
     auto_var = tk.BooleanVar(value=config.get("auto_start", True))
-    ttk.Checkbutton(main_frame, text="Açılışta otomatik yayına başla", variable=auto_var).pack(anchor="w", pady=(15, 5))
+    ttk.Checkbutton(main_frame, text=t("settings_auto_start"), variable=auto_var).pack(anchor="w", pady=(15, 5))
 
     btn_frame = ttk.Frame(main_frame)
     btn_frame.pack(fill="x", pady=(15, 0))
@@ -364,15 +482,16 @@ def run_settings_ui():
     def save():
         name = name_var.get().strip()
         if not name:
-            messagebox.showerror("Hata", "Cihaz adı boş olamaz.")
+            messagebox.showerror(t("settings_error_title"), t("settings_error_empty_name"))
             return
         config["device_name"] = name
         config["auto_start"] = auto_var.get()
+        config["language"] = display_to_code.get(lang_var.get(), DEFAULT_LANG)
         save_config(config)
         root.destroy()
 
-    ttk.Button(btn_frame, text="Kaydet", command=save).pack(side="right")
-    ttk.Button(btn_frame, text="İptal", command=root.destroy).pack(side="right", padx=(0, 5))
+    ttk.Button(btn_frame, text=t("settings_save"), command=save).pack(side="right")
+    ttk.Button(btn_frame, text=t("settings_cancel"), command=root.destroy).pack(side="right", padx=(0, 5))
 
     root.mainloop()
 
@@ -647,6 +766,7 @@ class PeerNode:
 class SharedClipboardApp:
     def __init__(self):
         self.config = load_config()
+        set_lang(self.config.get("language", DEFAULT_LANG))
         self.clipboard = ClipboardHandler()
         self.peer_names = []
         self.last_hash = ""
@@ -664,7 +784,7 @@ class SharedClipboardApp:
         self.icon = Icon(
             "SharedClipboard",
             create_icon_image(status_color="#999"),
-            title=f"Shared Clipboard v{__version__} — Yayında değil",
+            title=t("tooltip_offline", v=__version__),
             menu=Menu(self._menu_items),
         )
 
@@ -673,30 +793,30 @@ class SharedClipboardApp:
     def _menu_items(self):
         """pystray menü her açıldığında çağırır; güncel state'i render eder."""
         if self.peer_names:
-            peers_label = f"Bağlı cihazlar: {len(self.peer_names)}"
+            peers_label = t("menu_peers_count", n=len(self.peer_names))
             peer_submenu = Menu(
                 *[MenuItem(n, None, enabled=False) for n in self.peer_names]
             )
         else:
-            peers_label = "Bağlı cihaz yok"
-            peer_submenu = Menu(MenuItem("(kimse bulunamadı)", None, enabled=False))
+            peers_label = t("menu_peers_none")
+            peer_submenu = Menu(MenuItem(t("menu_no_peers_found"), None, enabled=False))
 
         history_submenu = Menu(*self._history_items())
 
         return (
             MenuItem(f"Shared Clipboard v{__version__}", None, enabled=False),
             Menu.SEPARATOR,
-            MenuItem("Ayarlar", self._open_settings),
+            MenuItem(t("menu_settings"), self._open_settings),
             Menu.SEPARATOR,
             MenuItem(peers_label, peer_submenu),
-            MenuItem("Son Kopyalananlar", history_submenu),
+            MenuItem(t("menu_history"), history_submenu),
             Menu.SEPARATOR,
-            MenuItem("Çıkış", self._quit),
+            MenuItem(t("menu_quit"), self._quit),
         )
 
     def _history_items(self):
         if not self.history:
-            return [MenuItem("(boş)", None, enabled=False)]
+            return [MenuItem(t("menu_history_empty"), None, enabled=False)]
         items = []
         # En yenisi en üstte; son 10 kayıt
         for entry in reversed(self.history[-10:]):
@@ -705,7 +825,7 @@ class SharedClipboardApp:
                 label = label[:57] + "..."
             items.append(MenuItem(label, self._make_history_action(entry)))
         items.append(Menu.SEPARATOR)
-        items.append(MenuItem("Geçmişi Temizle", self._clear_history))
+        items.append(MenuItem(t("menu_clear_history"), self._clear_history))
         return items
 
     def _make_history_action(self, entry):
@@ -777,14 +897,25 @@ class SharedClipboardApp:
             self._settings_proc.wait()
         except Exception:
             return
-        # device_name değişmiş olabilir: node'u yeniden başlat
         new_config = load_config()
-        if new_config.get("device_name") != self.config.get("device_name"):
-            self.config = new_config
+        name_changed = new_config.get("device_name") != self.config.get("device_name")
+        lang_changed = new_config.get("language") != self.config.get("language")
+        self.config = new_config
+        if lang_changed:
+            set_lang(self.config.get("language", DEFAULT_LANG))
+            self._refresh_title()
+        if name_changed:
             self._restart_node()
-        else:
-            self.config = new_config
         self._update_menu()
+
+    def _refresh_title(self):
+        """Mevcut state'e göre tray tooltip'ini tekrar üretir (dil değişiminden sonra)."""
+        if self.peer_names:
+            self.icon.title = t("tooltip_peers", n=len(self.peer_names))
+        elif self.node and self.loop:
+            self.icon.title = t("tooltip_device", name=self.config["device_name"])
+        else:
+            self.icon.title = t("tooltip_offline", v=__version__)
 
     def _quit(self):
         self.running = False
@@ -851,7 +982,7 @@ class SharedClipboardApp:
             return
 
         self._update_icon("online")
-        self.icon.title = f"Shared Clipboard — {self.config['device_name']}"
+        self.icon.title = t("tooltip_device", name=self.config["device_name"])
         self._update_menu()
 
         try:
@@ -889,7 +1020,7 @@ class SharedClipboardApp:
         if len(self.history) > 20:
             self.history = self.history[-20:]
         self._update_icon("receiving")
-        self.icon.title = f"📥 {sender}: {content[:40]}"
+        self.icon.title = t("tooltip_received", sender=sender, content=content[:40])
         self._update_menu()
 
         # Kısa süre sonra normal duruma dön (UI thread'inde tetiklemek için timer)
@@ -898,9 +1029,9 @@ class SharedClipboardApp:
     def _on_peers_changed(self, names):
         self.peer_names = names
         if names:
-            self.icon.title = f"Shared Clipboard — {len(names)} cihaz bağlı"
+            self.icon.title = t("tooltip_peers", n=len(names))
         else:
-            self.icon.title = f"Shared Clipboard — {self.config['device_name']}"
+            self.icon.title = t("tooltip_device", name=self.config["device_name"])
         self._update_menu()
 
     # ── Yardımcı ──

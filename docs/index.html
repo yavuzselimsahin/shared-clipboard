@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="tr">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Shared Clipboard — Yerel ağda pano eşitleme</title>
-<meta name="description" content="Aynı yerel ağdaki bilgisayarlar arasında pano içeriğini otomatik olarak eşitleyen açık kaynaklı masaüstü uygulaması. Sunucu, hesap ve internet bağlantısı gerektirmez.">
+<title data-i18n="page_title">Shared Clipboard — Clipboard sync over LAN</title>
+<meta name="description" id="meta-description" content="Open-source desktop application that automatically synchronises clipboard contents between computers on the same local network. No server, no account, no internet required.">
 <style>
   :root {
     --fg: #111;
@@ -156,19 +156,256 @@
   }
   footer a { color: var(--accent); text-decoration: none; }
   footer a:hover { text-decoration: underline; }
-  kbd {
-    background: #fff;
+
+  /* Language toggle */
+  .lang-toggle {
+    position: fixed;
+    top: 18px;
+    right: 18px;
+    display: inline-flex;
+    background: var(--card);
     border: 1px solid var(--border);
-    border-bottom-width: 2px;
-    border-radius: 4px;
-    padding: 1px 6px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: .85em;
+    border-radius: 999px;
+    padding: 3px;
+    font-size: .82rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,.04);
+    z-index: 10;
+  }
+  .lang-toggle button {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    padding: 5px 12px;
+    cursor: pointer;
+    border-radius: 999px;
+    font: inherit;
+    color: var(--muted);
+    letter-spacing: .04em;
+  }
+  .lang-toggle button:hover { color: var(--fg); }
+  .lang-toggle button.active {
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+  }
+
+  /* Show only the active language */
+  [data-lang]:not(.active) { display: none; }
+
+  @media (max-width: 520px) {
+    .lang-toggle { top: 10px; right: 10px; }
+    main { padding-top: 56px; }
   }
 </style>
 </head>
 <body>
+
+<div class="lang-toggle" role="group" aria-label="Language selector">
+  <button type="button" data-set-lang="en">EN</button>
+  <button type="button" data-set-lang="tr">TR</button>
+</div>
+
 <main>
+
+<!-- ===================== ENGLISH ===================== -->
+<section data-lang="en">
+  <header>
+    <h1>Shared Clipboard</h1>
+    <p class="lede">
+      An open-source desktop application that automatically synchronises
+      clipboard contents between computers on the same local network. No
+      external server, user account, or internet connection is required.
+    </p>
+  </header>
+
+  <a class="download" data-download="en" href="#" aria-disabled="true">Loading release…</a>
+  <div class="meta" data-meta="en"></div>
+  <ul class="alt-list" data-assets="en"></ul>
+
+  <div class="note" data-mac-note="en" hidden>
+    The macOS build is produced only for <strong>Apple Silicon
+    (M1 / M2 / M3 / M4)</strong> processors. Intel-based Macs are not
+    currently supported.
+  </div>
+
+  <h2>Overview</h2>
+  <p>
+    The application runs quietly in the menu bar (on macOS) or the system
+    tray (on Windows and Linux). When a copy operation is performed on one
+    device, the content becomes instantly available on every other device
+    on the same local network.
+  </p>
+  <p>
+    Devices discover each other over <code>mDNS (Bonjour)</code> and
+    communicate directly through <code>WebSocket</code> connections. The
+    transmitted data does not pass through any server and never leaves the
+    local network.
+  </p>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Zero configuration</h3>
+      <p>It is sufficient for devices to be on the same Wi-Fi network; no pairing step is required.</p>
+    </div>
+    <div class="card">
+      <h3>Local and private</h3>
+      <p>All traffic remains within the local network; no data is sent to any external service.</p>
+    </div>
+    <div class="card">
+      <h3>Mesh topology</h3>
+      <p>Devices connect to each other directly; no central server is involved.</p>
+    </div>
+  </div>
+
+  <h2>System Requirements</h2>
+  <ul>
+    <li><strong>macOS:</strong> version 12 (Monterey) or later on Apple Silicon.</li>
+    <li><strong>Windows:</strong> Windows 10 or 11 (x64).</li>
+    <li><strong>Linux:</strong> an X11 or Wayland desktop environment together with the clipboard utilities listed below.</li>
+  </ul>
+
+  <h2>Installation and First Launch</h2>
+  <p>
+    The sections below describe the security warnings and system permissions
+    that may be encountered when the application is launched for the first
+    time on each operating system.
+  </p>
+
+  <details open>
+    <summary>macOS — Gatekeeper warning and Local Network permission</summary>
+    <p>
+      Because the application is not notarised under the Apple Developer
+      Program, macOS displays a security warning on first launch. The
+      warning can be cleared by following these steps:
+    </p>
+    <ol>
+      <li>
+        Open the downloaded ZIP archive and move
+        <code>SharedClipboard.app</code> into the <code>/Applications</code>
+        folder.
+      </li>
+      <li>
+        Double-click the application to attempt to launch it. macOS will
+        display a dialog titled
+        <em>"Apple could not verify ‘SharedClipboard’ is free of malware
+        that may harm your Mac…"</em> and will block the application.
+        Dismiss the warning.
+      </li>
+      <li>
+        Open <strong>System Settings → Privacy &amp; Security</strong>.
+        Scroll to the bottom of the page; an
+        <strong>Open Anyway</strong> button is shown next to the message
+        <em>"SharedClipboard was blocked from use…"</em>. Click it and
+        confirm with a password or Touch ID if prompted.
+      </li>
+      <li>
+        In the second dialog that appears, click <strong>Open</strong>. The
+        application will start normally from this point on.
+      </li>
+      <li>
+        The application requests permission to discover devices on the
+        local network. On macOS 14 and later a system dialog titled
+        <em>"…would like to find devices on your local network."</em> is
+        displayed; the <strong>Allow</strong> option must be selected. If
+        the prompt is dismissed accidentally, the permission can be
+        re-enabled afterwards via
+        <strong>System Settings → Privacy &amp; Security → Local
+        Network</strong>.
+      </li>
+    </ol>
+    <p>
+      As an alternative, the quarantine attribute can be removed from the
+      Terminal. When this method is used, the <em>Open Anyway</em> step is
+      bypassed:
+    </p>
+    <pre><code>xattr -dr com.apple.quarantine /Applications/SharedClipboard.app</code></pre>
+  </details>
+
+  <details>
+    <summary>Windows — SmartScreen and Defender Firewall</summary>
+    <p>
+      Because the application is not signed with a code-signing certificate,
+      Microsoft Defender SmartScreen displays a warning on first launch.
+    </p>
+    <ol>
+      <li>
+        Open the ZIP archive and move <code>SharedClipboard.exe</code> to a
+        preferred location.
+      </li>
+      <li>
+        When the application is launched, a blue SmartScreen window
+        titled <em>"Windows protected your PC"</em> is displayed. Click
+        <strong>More info</strong> and then <strong>Run anyway</strong>.
+      </li>
+      <li>
+        Windows Defender Firewall raises two separate permission dialogs,
+        one for mDNS discovery and one for the WebSocket connection. In
+        both dialogs the <strong>Private networks</strong> checkbox should
+        be selected and the request confirmed with
+        <strong>Allow access</strong>.
+      </li>
+    </ol>
+  </details>
+
+  <details>
+    <summary>Linux — installing dependencies</summary>
+    <p>
+      On Linux distributions, additional packages are required for
+      clipboard access and the system tray. The commands below target
+      Debian and Ubuntu based systems; equivalent package-manager commands
+      should be used on other distributions.
+    </p>
+    <ul>
+      <li>
+        <strong>For X11 sessions:</strong>
+        <pre><code>sudo apt install xclip python3-tk libappindicator3-1</code></pre>
+      </li>
+      <li>
+        <strong>For Wayland sessions:</strong>
+        <pre><code>sudo apt install wl-clipboard python3-tk</code></pre>
+      </li>
+      <li>
+        Mark the downloaded executable as runnable:
+        <pre><code>chmod +x SharedClipboard</code></pre>
+      </li>
+    </ul>
+  </details>
+
+  <h2>How It Works</h2>
+  <p>
+    Once started, each client advertises itself over mDNS under the service
+    type <code>_sharedclipboard._tcp.local.</code> and begins browsing for
+    other devices announcing the same service type. A dedicated WebSocket
+    connection is opened to every discovered peer, forming a full-mesh
+    topology. When the local clipboard content changes, the new content is
+    transmitted simultaneously to every connected peer.
+  </p>
+  <p>
+    Because the architecture has no central broker, a single device going
+    offline does not affect communication between the remaining devices.
+    New devices are discovered automatically when they join the network,
+    and devices that leave are removed from the active list.
+  </p>
+
+  <h2>Security Notice</h2>
+  <p>
+    Clipboard content is transmitted over the local network
+    <strong>without encryption</strong>. The application should therefore
+    only be used on trusted home or office Wi-Fi networks. Running it on
+    public or unprotected wireless networks may allow other devices on the
+    same network to read the copied data.
+  </p>
+
+  <footer>
+    Source code and release history:
+    <a href="https://github.com/yavuzselimsahin/shared-clipboard">github.com/yavuzselimsahin/shared-clipboard</a>
+    <br>
+    Released under the MIT License.
+  </footer>
+</section>
+
+<!-- ===================== TÜRKÇE ===================== -->
+<section data-lang="tr">
   <header>
     <h1>Shared Clipboard</h1>
     <p class="lede">
@@ -178,12 +415,11 @@
     </p>
   </header>
 
-  <a id="primary" class="download" href="#" aria-disabled="true">Sürüm yükleniyor…</a>
-  <div id="meta" class="meta"></div>
+  <a class="download" data-download="tr" href="#" aria-disabled="true">Sürüm yükleniyor…</a>
+  <div class="meta" data-meta="tr"></div>
+  <ul class="alt-list" data-assets="tr"></ul>
 
-  <ul id="all-assets" class="alt-list"></ul>
-
-  <div class="note" id="mac-note" hidden>
+  <div class="note" data-mac-note="tr" hidden>
     macOS sürümü yalnızca <strong>Apple Silicon (M1 / M2 / M3 / M4)</strong>
     işlemciler için derlenmektedir. Intel tabanlı Mac modelleri şu an
     desteklenmemektedir.
@@ -305,7 +541,7 @@
   </details>
 
   <details>
-    <summary>Linux — Bağımlılıkların kurulumu</summary>
+    <summary>Linux — bağımlılıkların kurulumu</summary>
     <p>
       Linux dağıtımlarında pano erişimi ve gösterge alanı (system tray)
       için ek paketler gereklidir. Aşağıdaki komutlar Debian/Ubuntu
@@ -359,10 +595,76 @@
     <br>
     MIT Lisansı altında yayımlanmıştır.
   </footer>
+</section>
+
 </main>
 
 <script>
 const REPO = "yavuzselimsahin/shared-clipboard";
+const STORAGE_KEY = "sc-lang";
+
+const I18N = {
+  en: {
+    pageTitle: "Shared Clipboard — Clipboard sync over LAN",
+    metaDescription: "Open-source desktop application that automatically synchronises clipboard contents between computers on the same local network. No server, no account, no internet required.",
+    loading: "Loading release…",
+    noReleaseBtn: "No release published yet",
+    noReleaseMeta: "This link will become active once the first release is published.",
+    noAssets: "No downloadable files for this release",
+    downloadPrefix: "Download — ",
+    chooseBelow: "Select a platform-appropriate build below",
+    fetchFailedBtn: "Could not retrieve release information",
+    fetchFailedMeta: " — Manual download: ",
+    allReleases: "All releases:",
+    dateLocale: "en-GB",
+  },
+  tr: {
+    pageTitle: "Shared Clipboard — Yerel ağda pano eşitleme",
+    metaDescription: "Aynı yerel ağdaki bilgisayarlar arasında pano içeriğini otomatik olarak eşitleyen açık kaynaklı masaüstü uygulaması. Sunucu, hesap ve internet bağlantısı gerektirmez.",
+    loading: "Sürüm yükleniyor…",
+    noReleaseBtn: "Henüz yayımlanmış bir sürüm bulunmamaktadır",
+    noReleaseMeta: "İlk sürüm yayımlandığında bu bağlantı etkin hâle gelecektir.",
+    noAssets: "Bu sürüme ait indirilebilir dosya bulunamadı",
+    downloadPrefix: "İndir — ",
+    chooseBelow: "Platforma uygun sürüm aşağıdan seçilebilir",
+    fetchFailedBtn: "Sürüm bilgisi alınamadı",
+    fetchFailedMeta: " — Manuel indirme adresi: ",
+    allReleases: "Tüm sürümler:",
+    dateLocale: "tr-TR",
+  },
+};
+
+let currentLang = "en";
+let releaseData = null; // cached GitHub API response
+
+function getDefaultLang() {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (stored && I18N[stored]) return stored;
+  const nav = (navigator.language || "").toLowerCase();
+  if (nav.startsWith("tr")) return "tr";
+  return "en";
+}
+
+function setLang(lang) {
+  if (!I18N[lang]) return;
+  currentLang = lang;
+  localStorage.setItem(STORAGE_KEY, lang);
+  document.documentElement.lang = lang;
+
+  document.title = I18N[lang].pageTitle;
+  const md = document.getElementById("meta-description");
+  if (md) md.setAttribute("content", I18N[lang].metaDescription);
+
+  document.querySelectorAll("[data-lang]").forEach(el => {
+    el.classList.toggle("active", el.dataset.lang === lang);
+  });
+  document.querySelectorAll(".lang-toggle [data-set-lang]").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.setLang === lang);
+  });
+
+  // Re-render dynamic release info in the new language
+  if (releaseData !== null) renderRelease();
+}
 
 function detectOS() {
   const ua = navigator.userAgent;
@@ -386,55 +688,87 @@ function fmtSize(bytes) {
   return mb < 1 ? `${(bytes/1000).toFixed(0)} KB` : `${mb.toFixed(1)} MB`;
 }
 
-async function init() {
-  const btn = document.getElementById("primary");
-  const meta = document.getElementById("meta");
-  const list = document.getElementById("all-assets");
-  const macNote = document.getElementById("mac-note");
+function selectFor(lang, attr) {
+  return document.querySelector(`[data-${attr}="${lang}"]`);
+}
 
+function renderRelease() {
+  const lang = currentLang;
+  const labels = I18N[lang];
+  const btn = selectFor(lang, "download");
+  const meta = selectFor(lang, "meta");
+  const list = selectFor(lang, "assets");
+  const macNote = selectFor(lang, "mac-note");
+  if (!btn || !meta || !list) return;
+
+  // Reset
+  btn.textContent = labels.loading;
+  btn.setAttribute("aria-disabled", "true");
+  btn.removeAttribute("href");
+  meta.textContent = "";
+  meta.innerHTML = "";
+  list.innerHTML = "";
+  if (macNote) macNote.hidden = true;
+
+  if (releaseData === "error") {
+    btn.textContent = labels.fetchFailedBtn;
+    meta.innerHTML = `${labels.fetchFailedMeta}<a href="https://github.com/${REPO}/releases">github.com/${REPO}/releases</a>`;
+    return;
+  }
+  if (releaseData === "none") {
+    btn.textContent = labels.noReleaseBtn;
+    meta.textContent = labels.noReleaseMeta;
+    return;
+  }
+
+  const rel = releaseData;
+  const assets = (rel.assets || []).filter(a => /\.zip$/i.test(a.name));
+  if (!assets.length) {
+    btn.textContent = labels.noAssets;
+    return;
+  }
+
+  const os = detectOS();
+  const picked = pickAsset(os, assets);
+
+  if (picked) {
+    btn.textContent = `${labels.downloadPrefix}${picked.name}`;
+    btn.href = picked.browser_download_url;
+    btn.removeAttribute("aria-disabled");
+  } else {
+    btn.textContent = labels.chooseBelow;
+  }
+
+  const date = new Date(rel.published_at).toLocaleDateString(labels.dateLocale);
+  meta.textContent = `${rel.tag_name} · ${date}`;
+
+  list.innerHTML = `<li><strong>${labels.allReleases}</strong></li>` + assets.map(a =>
+    `<li><a href="${a.browser_download_url}">${a.name}</a> · ${fmtSize(a.size)}</li>`
+  ).join("");
+
+  if (os === "mac" && macNote) macNote.hidden = false;
+}
+
+async function loadReleases() {
   try {
     const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
-    if (r.status === 404) {
-      btn.textContent = "Henüz yayımlanmış bir sürüm bulunmamaktadır";
-      meta.textContent = "İlk sürüm yayımlandığında bu bağlantı etkin hâle gelecektir.";
-      return;
-    }
+    if (r.status === 404) { releaseData = "none"; renderRelease(); return; }
     if (!r.ok) throw new Error(`GitHub API ${r.status}`);
-    const rel = await r.json();
-    const assets = (rel.assets || []).filter(a => /\.zip$/i.test(a.name));
-
-    if (!assets.length) {
-      btn.textContent = "Bu sürüme ait indirilebilir dosya bulunamadı";
-      return;
-    }
-
-    const os = detectOS();
-    const picked = pickAsset(os, assets);
-
-    if (picked) {
-      btn.textContent = `İndir — ${picked.name}`;
-      btn.href = picked.browser_download_url;
-      btn.removeAttribute("aria-disabled");
-    } else {
-      btn.textContent = "Platforma uygun sürüm aşağıdan seçilebilir";
-    }
-
-    const date = new Date(rel.published_at).toLocaleDateString("tr-TR");
-    meta.textContent = `${rel.tag_name} · ${date}`;
-
-    list.innerHTML = "<li><strong>Tüm sürümler:</strong></li>" + assets.map(a =>
-      `<li><a href="${a.browser_download_url}">${a.name}</a> · ${fmtSize(a.size)}</li>`
-    ).join("");
-
-    if (os === "mac") {
-      macNote.hidden = false;
-    }
+    releaseData = await r.json();
   } catch (e) {
-    btn.textContent = "Sürüm bilgisi alınamadı";
-    meta.innerHTML = `${e.message} — Manuel indirme adresi: ` +
-      `<a href="https://github.com/${REPO}/releases">github.com/${REPO}/releases</a>`;
+    releaseData = "error";
   }
+  renderRelease();
 }
+
+function init() {
+  document.querySelectorAll(".lang-toggle [data-set-lang]").forEach(btn => {
+    btn.addEventListener("click", () => setLang(btn.dataset.setLang));
+  });
+  setLang(getDefaultLang());
+  loadReleases();
+}
+
 init();
 </script>
 </body>
