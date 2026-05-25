@@ -145,8 +145,7 @@ class ClipboardHandler:
     def get(self) -> str:
         try:
             if self.system == "Darwin":
-                r = subprocess.run(["pbpaste"], capture_output=True, text=True, timeout=2)
-                return r.stdout
+                return self._mac_get()
             elif self.system == "Windows":
                 return self._win_get()
             elif self.system == "Linux":
@@ -161,7 +160,7 @@ class ClipboardHandler:
     def set(self, text: str):
         try:
             if self.system == "Darwin":
-                subprocess.run(["pbcopy"], input=text, text=True, timeout=2)
+                self._mac_set(text)
             elif self.system == "Windows":
                 self._win_set(text)
             elif self.system == "Linux":
@@ -171,6 +170,23 @@ class ClipboardHandler:
                 log(f"clipboard set hatası ({self.system}): {e!r}")
             except Exception:
                 pass
+
+    @staticmethod
+    def _mac_get() -> str:
+        # NSPasteboard API'si encoding-bağımsız NSString döner.
+        # `pbpaste`/`pbcopy` .app içinde LANG eksik olunca MacRoman'a düşüp
+        # Türkçe karakterleri "?" yapıyor — bunu komple bypass ediyoruz.
+        from AppKit import NSPasteboard
+        pb = NSPasteboard.generalPasteboard()
+        s = pb.stringForType_("public.utf8-plain-text")
+        return str(s) if s is not None else ""
+
+    @staticmethod
+    def _mac_set(text: str):
+        from AppKit import NSPasteboard
+        pb = NSPasteboard.generalPasteboard()
+        pb.clearContents()
+        pb.setString_forType_(text, "public.utf8-plain-text")
 
     @staticmethod
     def _win_setup_ctypes():
@@ -270,16 +286,17 @@ class ClipboardHandler:
 
     def _linux_get(self) -> str:
         if self.linux_backend == "wayland":
-            r = subprocess.run(["wl-paste", "--no-newline"], capture_output=True, text=True, timeout=2)
+            r = subprocess.run(["wl-paste", "--no-newline"], capture_output=True, timeout=2)
         else:
-            r = subprocess.run(["xclip", "-selection", "clipboard", "-o"], capture_output=True, text=True, timeout=2)
-        return r.stdout
+            r = subprocess.run(["xclip", "-selection", "clipboard", "-o"], capture_output=True, timeout=2)
+        return r.stdout.decode("utf-8", errors="replace")
 
     def _linux_set(self, text: str):
+        data = text.encode("utf-8")
         if self.linux_backend == "wayland":
-            subprocess.run(["wl-copy"], input=text, text=True, timeout=2)
+            subprocess.run(["wl-copy"], input=data, timeout=2)
         else:
-            subprocess.run(["xclip", "-selection", "clipboard"], input=text, text=True, timeout=2)
+            subprocess.run(["xclip", "-selection", "clipboard"], input=data, timeout=2)
 
 
 # ──────────────────────────────────────────────
@@ -857,8 +874,8 @@ class SharedClipboardApp:
                     if len(self.history) > 20:
                         self.history = self.history[-20:]
                     self._update_menu()
-            except Exception:
-                pass
+            except Exception as e:
+                log(f"watch_clipboard hatası: {e!r}")
             await asyncio.sleep(interval)
 
     # ── Callback'ler ──

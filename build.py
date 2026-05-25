@@ -18,7 +18,11 @@ import subprocess
 import platform
 import sys
 import os
+import plistlib
 import zipfile
+
+
+BUNDLE_ID = "com.yavuzselimsahin.sharedclipboard"
 
 
 def build():
@@ -38,20 +42,40 @@ def build():
     # macOS'ta .app bundle yapacaksak --onedir kullanmak şart (PyInstaller >=6 uyarısı)
     package_mode = "--onedir" if system == "Darwin" else "--onefile"
 
+    # macOS-spesifik PyInstaller flag'leri:
+    # - --osx-bundle-identifier: kararlı bundle ID → Yerel Ağ izinleri kaybolmaz
+    # - --collect-all zeroconf: ifaddr ve C extension'lar dahil her şey
+    # - AppKit/Foundation/objc: pystray + NSPasteboard için
+    mac_extra = []
+    if system == "Darwin":
+        mac_extra = [
+            "--osx-bundle-identifier", BUNDLE_ID,
+            "--collect-all", "zeroconf",
+            "--hidden-import", "AppKit",
+            "--hidden-import", "Foundation",
+            "--hidden-import", "objc",
+        ]
+
     client_cmd = [
         sys.executable, "-m", "PyInstaller",
         package_mode,
+        "--noconfirm",                      # eski build'i sor­madan üzerine yaz
         "--windowed",                       # konsolsuz GUI
         "--name", "SharedClipboard",
-        "--collect-submodules", "zeroconf", # mDNS bağımlılıkları
+        "--collect-submodules", "zeroconf", # mDNS bağımlılıkları (non-mac için)
         "--hidden-import", "websockets.legacy",
         "--hidden-import", "websockets.legacy.client",
         "--hidden-import", "websockets.legacy.server",
+        *mac_extra,
         *icon_arg,
         "--add-data", f"README.md{os.pathsep}.",
         "tray_client.py",
     ]
     subprocess.run(client_cmd, check=True)
+
+    if system == "Darwin":
+        print("\n🔧 Info.plist'e Yerel Ağ + Bonjour key'leri yazılıyor...")
+        _patch_macos_info_plist()
 
     print("\n🗜️  ZIP paketleniyor...")
     asset = _package_asset(system)
@@ -68,6 +92,32 @@ Dağıtım:
   3. macOS'ta ilk açılışta "İnternetten gelen yazılım" uyarısı çıkabilir,
      sağ tık → Aç ile geç (veya Sistem Ayarları → Gizlilik & Güvenlik)
 """)
+
+
+def _patch_macos_info_plist():
+    """macOS 14+ Sonoma'da mDNS ve Yerel Ağ izni için Info.plist key'leri.
+
+    NSLocalNetworkUsageDescription olmadan macOS, app'in mDNS/multicast
+    yapma isteğini sessizce engeller — Yerel Ağ izin prompt'u çıkmaz,
+    bonjour servisleri görünmez. NSBonjourServices listesinde olmayan
+    servisleri de keşfedemezsin.
+    """
+    plist_path = "dist/SharedClipboard.app/Contents/Info.plist"
+    if not os.path.exists(plist_path):
+        print(f"  ⚠️  {plist_path} yok; atlanıyor")
+        return
+    with open(plist_path, "rb") as f:
+        plist = plistlib.load(f)
+    plist["CFBundleIdentifier"] = BUNDLE_ID
+    plist["NSLocalNetworkUsageDescription"] = (
+        "Aynı Wi-Fi'daki diğer cihazlarla pano içeriğini paylaşmak için."
+    )
+    plist["NSBonjourServices"] = ["_sharedclipboard._tcp"]
+    # LSUIElement: Dock'ta ikon gösterme (tray uygulaması)
+    plist["LSUIElement"] = True
+    with open(plist_path, "wb") as f:
+        plistlib.dump(plist, f)
+    print(f"  ✓ {plist_path} güncellendi")
 
 
 def _package_asset(system: str) -> str:
