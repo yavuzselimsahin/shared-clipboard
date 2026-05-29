@@ -108,6 +108,7 @@ LANGUAGES = {
         "settings_device_name": "Cihaz Adı:",
         "settings_language": "Dil:",
         "settings_auto_start": "Açılışta otomatik yayına başla",
+        "settings_start_at_login": "Bilgisayar açılınca otomatik başlat",
         "settings_save": "Kaydet",
         "settings_cancel": "İptal",
         "settings_error_title": "Hata",
@@ -135,6 +136,7 @@ LANGUAGES = {
         "settings_device_name": "Device name:",
         "settings_language": "Language:",
         "settings_auto_start": "Start broadcasting automatically on launch",
+        "settings_start_at_login": "Launch automatically when the computer starts",
         "settings_save": "Save",
         "settings_cancel": "Cancel",
         "settings_error_title": "Error",
@@ -219,6 +221,7 @@ def load_config() -> dict:
         "auto_start": True,
         "polling_ms": 300,
         "language": detect_default_lang(),
+        "start_at_login": False,
     }
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -233,6 +236,134 @@ def save_config(config: dict):
     path = get_config_path()
     with open(path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
+
+
+# ──────────────────────────────────────────────
+#  Açılışta başlatma (login / boot item)
+# ──────────────────────────────────────────────
+# auto_start ayarından farklıdır: bu özellik işletim sistemi oturumu
+# açıldığında uygulamayı otomatik başlatır.
+#   macOS   → ~/Library/LaunchAgents altında RunAtLoad plist'i
+#   Windows → HKCU\...\CurrentVersion\Run registry değeri
+#   Linux   → ~/.config/autostart altında .desktop dosyası
+# Üçü de kullanıcı seviyesindedir; yönetici/sudo yetkisi gerektirmez.
+
+AUTOSTART_LABEL = "com.sharedclipboard.autostart"
+AUTOSTART_NAME = "SharedClipboard"
+
+
+def _autostart_command():
+    """Oturum açılışında uygulamayı başlatacak argüman listesi."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable]
+    return [sys.executable, os.path.abspath(__file__)]
+
+
+def _mac_plist_path():
+    return os.path.expanduser(f"~/Library/LaunchAgents/{AUTOSTART_LABEL}.plist")
+
+
+def _linux_desktop_path():
+    return os.path.expanduser("~/.config/autostart/sharedclipboard.desktop")
+
+
+def set_autostart(enable: bool) -> bool:
+    """Açılışta başlatmayı etkinleştirir/kapatır. Başarılıysa True döner."""
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            _mac_set_autostart(enable)
+        elif system == "Windows":
+            _win_set_autostart(enable)
+        elif system == "Linux":
+            _linux_set_autostart(enable)
+        else:
+            return False
+        log(f"autostart {'etkin' if enable else 'kapalı'} ({system})")
+        return True
+    except Exception as e:
+        log(f"autostart ayarlanamadı: {e!r}")
+        return False
+
+
+def is_autostart_enabled() -> bool:
+    """İşletim sistemi düzeyinde açılışta başlatma kayıtlı mı?"""
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            return os.path.exists(_mac_plist_path())
+        elif system == "Windows":
+            import winreg
+            try:
+                with winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    r"Software\Microsoft\Windows\CurrentVersion\Run",
+                ) as key:
+                    winreg.QueryValueEx(key, AUTOSTART_NAME)
+                return True
+            except FileNotFoundError:
+                return False
+        elif system == "Linux":
+            return os.path.exists(_linux_desktop_path())
+    except Exception:
+        pass
+    return False
+
+
+def _mac_set_autostart(enable: bool):
+    import plistlib
+    plist_path = _mac_plist_path()
+    if enable:
+        os.makedirs(os.path.dirname(plist_path), exist_ok=True)
+        data = {
+            "Label": AUTOSTART_LABEL,
+            "ProgramArguments": _autostart_command(),
+            "RunAtLoad": True,
+            "ProcessType": "Interactive",
+        }
+        with open(plist_path, "wb") as f:
+            plistlib.dump(data, f)
+    else:
+        try:
+            os.remove(plist_path)
+        except FileNotFoundError:
+            pass
+
+
+def _win_set_autostart(enable: bool):
+    import winreg
+    run_key = r"Software\Microsoft\Windows\CurrentVersion\Run"
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, run_key, 0, winreg.KEY_SET_VALUE) as key:
+        if enable:
+            # Argümanları tek tek tırnakla; boşluklu yollar (Program Files) bozulmasın.
+            cmd = " ".join(f'"{a}"' for a in _autostart_command())
+            winreg.SetValueEx(key, AUTOSTART_NAME, 0, winreg.REG_SZ, cmd)
+        else:
+            try:
+                winreg.DeleteValue(key, AUTOSTART_NAME)
+            except FileNotFoundError:
+                pass
+
+
+def _linux_set_autostart(enable: bool):
+    desktop_path = _linux_desktop_path()
+    if enable:
+        os.makedirs(os.path.dirname(desktop_path), exist_ok=True)
+        exec_cmd = " ".join(_autostart_command())
+        content = (
+            "[Desktop Entry]\n"
+            "Type=Application\n"
+            "Name=Shared Clipboard\n"
+            f"Exec={exec_cmd}\n"
+            "X-GNOME-Autostart-enabled=true\n"
+        )
+        with open(desktop_path, "w", encoding="utf-8") as f:
+            f.write(content)
+    else:
+        try:
+            os.remove(desktop_path)
+        except FileNotFoundError:
+            pass
 
 
 # ──────────────────────────────────────────────
@@ -438,7 +569,7 @@ def run_settings_ui():
 
     root = tk.Tk()
     root.title(t("settings_title"))
-    root.geometry("440x300")
+    root.geometry("480x360")
     root.resizable(False, False)
 
     style = ttk.Style(root)
@@ -474,7 +605,15 @@ def run_settings_ui():
     ).grid(row=1, column=1, pady=5, padx=(10, 0))
 
     auto_var = tk.BooleanVar(value=config.get("auto_start", True))
-    ttk.Checkbutton(main_frame, text=t("settings_auto_start"), variable=auto_var).pack(anchor="w", pady=(15, 5))
+    ttk.Checkbutton(main_frame, text=t("settings_auto_start"), variable=auto_var).pack(anchor="w", pady=(15, 2))
+
+    # Açılışta başlatma kutusunun ilk değeri OS'taki gerçek duruma göre.
+    try:
+        login_default = is_autostart_enabled()
+    except Exception:
+        login_default = config.get("start_at_login", False)
+    login_var = tk.BooleanVar(value=login_default)
+    ttk.Checkbutton(main_frame, text=t("settings_start_at_login"), variable=login_var).pack(anchor="w", pady=(2, 5))
 
     btn_frame = ttk.Frame(main_frame)
     btn_frame.pack(fill="x", pady=(15, 0))
@@ -487,7 +626,10 @@ def run_settings_ui():
         config["device_name"] = name
         config["auto_start"] = auto_var.get()
         config["language"] = display_to_code.get(lang_var.get(), DEFAULT_LANG)
+        config["start_at_login"] = login_var.get()
         save_config(config)
+        # İşletim sistemi düzeyindeki login item'ı senkronla (idempotent).
+        set_autostart(login_var.get())
         root.destroy()
 
     ttk.Button(btn_frame, text=t("settings_save"), command=save).pack(side="right")
